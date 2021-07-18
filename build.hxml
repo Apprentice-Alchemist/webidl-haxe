@@ -1,0 +1,4 @@
+-cp src
+-m webidl.Main
+--interp
+# -js out.js

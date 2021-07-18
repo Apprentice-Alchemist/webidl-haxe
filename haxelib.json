@@ -1,0 +1,14 @@
+{
+    "name": "webidl",
+    "license": "MIT",
+    "description": "Webidl parser for haxe.",
+    "contributors": [
+        "Apprentice-Alchemist"
+    ],
+    "url": "https://github.com/Apprentice-Alchemist/webidl-haxe",
+    "version": "0.0.1",
+    "releasenote": "Initial version",
+    "classPath": "src",
+    "main": "webidl.Main",
+    "dependencies": {}
+}
