@@ -26,10 +26,6 @@ typedef Named = {
 	var name:String;
 }
 
-typedef Partial = {
-	var partial:Bool;
-}
-
 typedef Annotated = {
 	var attributes:ExtendedAttributes;
 }
@@ -41,42 +37,44 @@ typedef InterfaceMember = Named & {
 enum InterfaceMemberKind {
 	Const(type:CType, value:Constant);
 	Attribute(type:CType, ?_static:Bool, ?readonly:Bool);
-	Function(ret:CType, args:Array<Argument>,?_static:Bool);
+	Function(ret:CType, args:Array<Argument>, ?_static:Bool);
 }
 
-typedef DictionaryMember = Named & {
+typedef DictionaryMember = {
+	var name:String;
 	var optional:Bool;
 	var type:CType;
 	var ?value:Value;
 }
 
-typedef InterfaceType = Named &
-	Partial &
-	Annotated & {
+typedef InterfaceType = {
+	var name:String;
+	var attributes:ExtendedAttributes;
 	var members:Array<InterfaceMember>;
 	var mixin:Bool;
 	var ?parent:String;
 }
 
-typedef NamespaceType = Named &
-	Partial & {
+typedef NamespaceType = {
+	var name:String;
 	var members:Array<Definition>;
 };
 
-typedef DictionaryType = Named &
-	Partial &
-	Annotated & {
+typedef DictionaryType = {
+	var name:String;
+	var attributes:ExtendedAttributes;
 	var members:Array<DictionaryMember>;
 	var ?parent:String;
 }
 
-typedef EnumType = Named &
-	Annotated & {
+typedef EnumType = {
+	var name:String;
+	var attributes:ExtendedAttributes;
 	var values:Array<String>;
 }
 
-typedef TypedefType = Named & {
-	var type_attributes:ExtendedAttributes;
+typedef TypedefType = {
+	var name:String;
 	var type:CType;
 }
 
@@ -91,6 +89,7 @@ enum Definition {
 	});
 	Typedef(t:TypedefType);
 	Include(included:String, _in:String);
+	Partial(d:Definition);
 }
 
 typedef Argument = {
