@@ -1,244 +1,376 @@
 package webidl;
 
+import haxe.macro.Expr.Field;
+import haxe.macro.Expr.ComplexType;
+import haxe.macro.Expr.TypeDefinition;
 import webidl.Ast;
 import haxe.ds.StringMap;
-import sys.FileSystem;
-import webidl.Parser.ParserError;
-import sys.io.File;
 
 using Lambda;
 using StringTools;
 
 class Converter {
-	static function merge(what:InterfaceType, into:InterfaceType):InterfaceType {
-		// trace(what, into);
+	var interfaces = new StringMap<InterfaceType>();
+	var dictionaries = new StringMap<DictionaryType>();
+	var enums = new StringMap<EnumType>();
+	var typedefs = new StringMap<TypedefType>();
+
+	var mixins = new StringMap<InterfaceType>();
+	var includes:Array<{what:String, included:String}> = [];
+	var partials:Array<Definition> = [];
+
+	var type_paths = new StringMap<haxe.macro.Expr.TypePath>();
+
+	public function new() {}
+
+	public function convert():Array<TypeDefinition> {
+		var ret = [];
+		// resolve partials
+		for (p in partials)
+			switch p {
+				case Interface(part):
+					var i = interfaces.get(part.name);
+					if (i == null) {
+						trace("unknown interface", part.name);
+						continue;
+					}
+					i.attributes = i.attributes.concat(part.attributes);
+					i.members = i.members.concat(part.members);
+				case Namespace(n): // TODO
+				case _:
+					throw "partials should be interfaces or namespaces";
+			}
+		// mix mixins
+		for (inc in includes) {
+			var i = interfaces.get(inc.included);
+			if (i == null) {
+				trace("unkown interface", inc.included);
+				continue;
+			}
+			var m = mixins.get(inc.what);
+			i.members = i.members.concat(m.members);
+		}
+		// convert types
+		for (i in interfaces)
+			ret.push(convertInterface(i));
+		for (e in enums)
+			ret.push(convertEnum(e));
+		for (d in dictionaries)
+			ret.push(convertDictionary(d));
+		for (t in typedefs)
+			ret.push(convertTypedef(t));
+		return ret;
+	}
+
+	public function addDefinitions(defs:Array<Definition>, ?pack:Array<String>) {
+		if (pack == null)
+			pack = [];
+		for (def in defs) {
+			switch def {
+				case Mixin(i):
+					mixins.set(i.name, i);
+				case Interface(i):
+					type_paths.set(i.name, {
+						pack: pack,
+						name: i.name
+					});
+					interfaces.set(i.name, i);
+				case Namespace(n):
+					addDefinitions(n.members, pack);
+				case Dictionary(d):
+					type_paths.set(d.name, {
+						pack: pack,
+						name: d.name
+					});
+					dictionaries.set(d.name, d);
+				case Enum(e):
+					type_paths.set(e.name, {
+						pack: pack,
+						name: e.name
+					});
+					enums.set(e.name, e);
+				case Callback(c):
+				case Typedef(t):
+					type_paths.set(t.name, {
+						pack: pack,
+						name: t.name
+					});
+					typedefs.set(t.name, t);
+				case Includes(what, included):
+					includes.push({what: what, included: included});
+				case Partial(d):
+					partials.push(d);
+			}
+		}
+	}
+
+	function mergeMixin(mixin:InterfaceType, into:InterfaceType):InterfaceType {
 		return {
 			name: into.name,
 			attributes: into.attributes,
 			parent: into.parent,
-			mixin: false,
-			members: into.members.concat(what.members)
+			members: into.members.concat(mixin.members)
 		}
 	}
-
-	static function typeToHaxe(t:CType) {
-		return switch t {
-			case Rest(t):
-				'haxe.Rest<${typeToHaxe(t)}>';
-			case Undefined:
-				'Void';
-			case Boolean:
-				'Bool';
-			case Byte:
-				'Int';
-			case Octet:
-				'Int';
-			case Short:
-				'Int';
-			case Bigint:
-				'Int';
-			case Float:
-				'Float';
-			case Double:
-				'Float';
-			case UnsignedShort:
-				'Int';
-			case UnsignedLong:
-				'Int';
-			case UnsignedLongLong:
-				'Int';
-			case UnrestrictedFloat:
-				'Float';
-			case UnrestrictedDouble:
-				'Float';
-			case Long:
-				'Int';
-			case LongLong:
-				'Int';
-			case ByteString: 'String';
-			case DOMString: 'String';
-			case USVString: 'String';
-			case Promise(t): 'js.lib.Promise<${typeToHaxe(t)}>';
-			case Record(s, t): 'haxe.DynamicAccess<${typeToHaxe(t)}>';
-			case WithAttributes(e, t): typeToHaxe(t);
-			case Ident(s): if (s == "boolean") "Bool" else s;
-			case Sequence(t): 'Iterator<${typeToHaxe(t)}>';
-			case Object: "Dynamic";
-			case Symbol: 'js.lib.Symbol';
-			case Union(t): "Dynamic"; // t.fold((item, result) -> 'haxe.extern.EitherType<' + typeToHaxe(t) + ', $result>', typeToHaxe(t.pop()));
-			case Any: 'Any';
-			case Null(t): 'Null<${typeToHaxe(t)}>';
-			case ArrayBuffer, DataView, Int8Array, Int16Array, Int32Array, Uint8Array, Uint16Array, Uint32Array, Uint8ClampedArray, BigInt64Array,
-				BigUint64Array, Float32Array, Float64Array: 'js.lib.'
-				+ t.getName();
-			case FrozenArray(t): 'haxe.ds.ReadOnlyArray<${typeToHaxe(t)}>';
-		}
-	}
-
-	static var interfaces = new StringMap<InterfaceType>();
-	static var dictionaries = new StringMap<DictionaryType>();
-	static var enums = new StringMap<EnumType>();
-	static var typedefs = new StringMap<TypedefType>();
 
 	// static var conversions = new Map<String, String>();
-	static function valueToString(v:Value) {
+	function typeToHaxe(t:CType):ComplexType {
+		return switch t {
+			// @formatter:off
+			case Rest(typeToHaxe(_) => t): macro :haxe.extern.Rest<$t>;
+			case Undefined: macro :Void;
+			case Boolean: macro :Void;
+			case Byte,Octet,Short,Bigint: macro :Int;
+			case Float,Double,UnrestrictedFloat,UnrestrictedDouble: macro:Float;
+			case UnsignedShort: macro :Int;
+			case UnsignedLong: macro :Int;
+			case UnsignedLongLong: macro :Int;
+			case Long: macro :Int;
+			case LongLong: macro :Int;
+			case ByteString: macro :String;
+			case DOMString: macro :String;
+			case USVString: macro :String;
+			case Promise(typeToHaxe(_) => t): macro :js.lib.Promise<$t>;
+			case Record(s, typeToHaxe(_) => t): macro :DynamicAccess<$t>;
+			case WithAttributes(e, typeToHaxe(_) => t): t; // TODO
+			case Ident(s): 
+				if(type_paths.exists(s)) TPath(type_paths.get(s)) else {
+				trace("Warning : Failed to resolve identifier " + s);
+				macro :Dynamic;}
+			
+			case Sequence(typeToHaxe(_) => t): macro :Array<$t>;
+			case Object: macro :{};
+			case Symbol: macro :js.lib.Symbol;
+			case Union([for(_ in _) typeToHaxe(_)] => t): t.fold((item, result) -> macro :haxe.extern.EitherType<$result,$item>,t.pop());
+			case Any: macro :Any;
+			case Null(typeToHaxe(_) => t): macro :Null<$t>;
+			case ArrayBuffer: macro :js.lib.ArrayBuffer;
+			case DataView: macro :js.lib.DataView;
+			case Int8Array: macro :js.lib.Int8Array;
+			case Int16Array: macro :js.lib.Int16Array;
+			case Int32Array: macro :js.lib.Int32Array;
+			case Uint8Array: macro :js.lib.Uint8Array;
+			case Uint16Array: macro :js.lib.Uint16Array;
+			case Uint32Array: macro :js.lib.Uint32Array;
+			case Uint8ClampedArray: macro :js.lib.Uint8ClampedArray;
+			case BigInt64Array: macro :js.lib.BigInt64Array;
+			case BigUint64Array: macro :js.lib.BigUint64Array;
+			case Float32Array: macro :js.lib.Float32Array;
+			case Float64Array: macro :js.lib.Float64Array;
+			case FrozenArray(typeToHaxe(_) => t): macro :haxe.ds.ReadOnlyArray<$t>;
+			// @formatter:on
+		}
+	}
+
+	function valueToExpr(v:Value) {
 		return switch v {
-			case String(s): '"' + s + '"';
-			case EmptyDict: "{}";
-			case EmptyArray: "[]";
-			case Null: "null";
-			case Const(c): constToString(c);
+			case String(s): macro $v{s};
+			case EmptyDict: macro {};
+			case EmptyArray: macro [];
+			case Null: macro null;
+			case Const(c): constToExpr(c);
 		}
 	}
 
-	static function constToString(c:Constant) {
+	function constToExpr(c:Constant):haxe.macro.Expr {
 		return switch c {
-			case True:
-				"true";
-			case False:
-				"false";
-			case Integer(s):
-				s;
-			case Decimal(s):
-				s;
-			case MinusInfinity:
-				"-Math.INFINITY";
-			case Infinity:
-				"Math.INFINITY";
-			case NaN:
-				"Math.NaN";
+			case True: macro true;
+			case False: macro false;
+			case Integer(s): {
+					expr: EConst(CInt(s)),
+					pos: (macro null).pos
+				}
+			case Decimal(s): {
+					expr: EConst(CFloat(s)),
+					pos: (macro null).pos
+				}
+			case MinusInfinity: macro Math.INFINITY;
+			case Infinity: macro - Math.INFINITY;
+			case NaN: macro Math.NaN;
 		}
 	}
 
-	static function convertInterface(i:InterfaceType) {
-		var o = new StringBuf();
-		o.add("package wgpu;\n\n");
-
+	function convertInterface(i:InterfaceType):TypeDefinition {
+		final pack = type_paths.get(i.name).pack;
 		if (i.members.foreach(item -> item.kind.match(Const(_, _)))) {
-			o.add("enum abstract " + i.name + "(Int) {\n");
-			for (m in i.members) {
-				switch m.kind {
-					case Const(type, value):
-						o.add('    final ' + m.name + ' = ' + constToString(value) + ';\n');
-					case _:
-						// case Attribute(type, _static, readonly):
-						// case Function(ret, args, _static):
-				}
-			}
+			return {
+				pack: pack,
+				name: i.name,
+				pos: cast null,
+				kind: TDAbstract(macro:Int),
+				fields: [
+					for (m in i.members)
+						({
+							name:m.name, kind:FVar(null, switch m.kind {
+								case Const(type, value): constToExpr(value);
+								case _: throw "assert";
+							}), pos:cast null
+						} : Field)
+				].concat([
+					{
+						name: "and",
+						kind: FFun({
+							args: [
+								{
+									name: "a",
+									type: TPath(type_paths.get(i.name))
+								},
+								{
+									name: "b",
+									type: TPath(type_paths.get(i.name))
+								}
+							],
+							ret: TPath(type_paths.get(i.name))
+						}),
+						pos: (macro null).pos,
+						access: [AStatic],
+						meta: [
+							{
+								name: ":op",
+								params: [macro A | B],
+								pos: (macro null).pos
+							}
+						]
+					}
+					]),
+				meta: [
+					{
+						name: ":enum",
+						pos: cast null
+					}
+				]
+			};
 		} else {
-			o.add('@:native("${i.name}")\n');
-			o.add("extern class " + i.name);
-			if (i.parent != null) {
-				if (i.parent == "EventTarget")
-					i.parent = "js.html.EventTarget";
-				o.add(' extends ${i.parent}');
-			}
-			o.add(" {\n");
-			for (m in i.members) {
-				switch m.kind {
-					case Const(type, value):
-						if (value != null)
-							trace(value);
-						o.add('    final ${m.name}:${typeToHaxe(type)};\n');
-					case Attribute(type, _static, readonly):
-						o.add('    ');
-						if (_static)
-							o.add('static ');
-						o.add(readonly ? 'final ' : 'var ');
-						o.add(m.name);
-						o.add(':${typeToHaxe(type)};\n');
-					case Function(ret, args, _static):
-						o.add('    ');
-						if (_static)
-							o.add('static ');
-						o.add('function ${m.name}(');
-						o.add([
-							for (arg in args)
-								'${arg.optional ? "?" : ""}${arg.name}:${typeToHaxe(arg.type)}'
-						].join(", "));
-						o.add('):${typeToHaxe(ret)};\n');
-				}
+			return {
+				pack: pack,
+				name: i.name,
+				pos: (macro null).pos,
+				kind: TDClass(i.parent == null ? null : type_paths.get(i.parent), null, false, false, false),
+				fields: [
+					for (f in i.members)
+						switch f.kind {
+							case Const(type, value):
+								{
+									name: f.name,
+									kind: FVar(typeToHaxe(type), constToExpr(value)),
+									pos: (macro null).pos,
+									access: [AInline, AStatic]
+								}
+							case Attribute(type, _static, readonly):
+								var access:Array<haxe.macro.Expr.Access> = [];
+								if (_static)
+									access.push(AStatic);
+								if (readonly)
+									access.push(AFinal);
+								{
+									name: f.name,
+									kind: FVar(typeToHaxe(type)),
+									pos: (macro null).pos,
+									access: access
+								}
+							case Function(ret, args, _static):
+								{
+									name: f.name,
+									kind: FFun({
+										args: [
+											for (a in args)
+												{
+													name: a.name,
+													opt: a.optional,
+													type: typeToHaxe(a.type),
+													value: a.value == null ? null : valueToExpr(a.value),
+													meta: []
+												}
+										],
+										ret: typeToHaxe(ret)
+									}),
+									pos: (macro null).pos,
+									access: _static ? [AStatic] : []
+								}
+						}
+				],
+				isExtern: true,
+				meta: [
+					{
+						name: ":native",
+						params: [macro $v{i.name}],
+						pos: (macro null).pos
+					}
+				]
 			}
 		}
-
-		o.add("}\n");
-		return o.toString();
 	}
 
-	// var includes = [];
-	// var partials = [];
-	// for (def in ast) {
-	// 	switch def {
-	// 		case Interface(i):
-	// 			if (i.partial)
-	// 				partials.push(i)
-	// 			else
-	// 				interfaces.set(i.name, i);
-	// 		case Dictionary(d):
-	// 			dictionaries.set(d.name, d);
-	// 		case Enum(e):
-	// 			enums.set(e.name, e);
-	// 		case Callback(c):
-	// 		case Typedef(t):
-	// 			typedefs.set(t.name, t);
-	// 		case Include(included, _in):
-	// 			includes.push([included, _in]);
-	// 		case Namespace(n):
-	// 	}
-	// }
-	// for (i in partials) {
-	// 	var int = interfaces.get(i.name);
-	// 	if (int != null) {
-	// 		int.members = int.members.concat(i.members);
-	// 	}
-	// 	interfaces.set(i.name, int);
-	// }
-	// for (i in includes) {
-	// 	if (interfaces.exists(i[1]))
-	// 		interfaces.set(i[1], merge(interfaces.get(i[0]), interfaces.get(i[1])));
-	// }
-	// for (i in interfaces) {
-	// 	sys.io.File.saveContent("src/wgpu/" + i.name + ".hx", convertInterface(i));
-	// }
-	// for (t in typedefs) {
-	// 	var o = new StringBuf();
-	// 	o.add("package wgpu;\n\n");
-	// 	o.add("typedef " + t.name + " = " + typeToHaxe(t.type) + ";\n");
-	// 	sys.io.File.saveContent("src/wgpu/" + t.name + ".hx", o.toString());
-	// }
-	// for (d in dictionaries) {
-	// 	var o = new StringBuf();
-	// 	o.add("package wgpu;\n\n");
-	// 	o.add("typedef " + d.name + " = ");
-	// 	if (d.parent != null)
-	// 		o.add(d.parent + " & ");
-	// 	o.add("{\n");
-	// 	for (m in d.members) {
-	// 		o.add("    var ");
-	// 		if (m.optional)
-	// 			o.add("?");
-	// 		o.add(m.name);
-	// 		o.add(':${typeToHaxe(m.type)}');
-	// 		// if (m.value != null)
-	// 		// 	o.add(' = ${valueToString(m.value)}');
-	// 		o.add(";\n");
-	// 	}
-	// 	o.add("}\n");
-	// 	sys.io.File.saveContent("src/wgpu/" + d.name + ".hx", o.toString());
-	// }
-	// for (e in enums) {
-	// 	var o = new StringBuf();
-	// 	o.add("package wgpu;\n\n");
-	// 	o.add("enum abstract " + e.name + "(String) to String {\n");
-	// 	for (v in e.values) {
-	// 		o.add("    var ");
-	// 		var name = v.toUpperCase().replace("-", '_');
-	//         if(~/^[0-9]/i.match(name)) name = "_" + name;
-	// 		o.add(name);
-	// 		o.add(' = "${v}"');
-	// 		o.add(";\n");
-	// 	}
-	// 	o.add("}\n");
-	// 	sys.io.File.saveContent("src/wgpu/" + e.name + ".hx", o.toString());
-	// }
+	function convertDictionary(e:DictionaryType):TypeDefinition {
+		final path = type_paths.get(e.name);
+		final fields:Array<Field> = [
+			for (m in e.members)
+				{
+					name: m.name,
+					kind: FVar(typeToHaxe(m.type), null /**Typedefs do not support default values in haxe**/),
+					pos: (macro null).pos,
+					meta: if (m.optional) [
+						{
+							name: ":optional",
+							pos: (macro null).pos
+						}
+					] else null
+				}
+		];
+		return if (e.parent != null) {
+			pack: path.pack,
+			name: e.name,
+			pos: (macro null).pos,
+			kind: TDAlias(TIntersection([TPath(type_paths.get(e.parent)), TAnonymous(fields)])),
+			fields: []
+		} else {
+			pack: path.pack,
+			name: e.name,
+			pos: (macro null).pos,
+			kind: TDStructure,
+			fields: fields
+		}
+	}
+
+	function toIdent(s:String) {
+		s = s.replace("-", "_");
+		final r = ~/^[0-9]/m;
+		if (r.match(s))
+			return "_" + s;
+		return s;
+	}
+
+	function convertEnum(e:EnumType):TypeDefinition {
+		return {
+			pack: type_paths.get(e.name).pack,
+			name: e.name,
+			pos: (macro null).pos,
+			kind: TDAbstract(macro:String, [macro:String], [macro:String]),
+			fields: [
+				for (m in e.values)
+					{
+						name: toIdent(m).toUpperCase(), // Make them higher up in completion
+						kind: FVar(null, macro $v{m}),
+						pos: (macro null).pos
+					}
+			],
+			meta: [
+				{
+					name: ":enum",
+					pos: (macro null).pos
+				}
+			]
+		}
+	}
+
+	function convertTypedef(t:TypedefType):TypeDefinition {
+		final path = type_paths.get(t.name);
+		return {
+			pack: path.pack,
+			name: t.name,
+			pos: (macro null).pos,
+			kind: TDAlias(typeToHaxe(t.type)),
+			fields: []
+		}
+	}
 }

@@ -147,6 +147,8 @@ class Lexer {
 		var s = new StringBuf();
 		while (true) {
 			var c = next();
+			if (c == null)
+				throw "eof";
 			if (c == ec)
 				break;
 			else {

@@ -7,6 +7,10 @@ typedef Position = {
 	var max:Int;
 }
 
+typedef Config = {
+	var ?pack:String;
+}
+
 typedef ExtendedAttributes = Array<ExtendedAttribute>;
 
 typedef ExtendedAttribute = {
@@ -51,7 +55,7 @@ typedef InterfaceType = {
 	var name:String;
 	var attributes:ExtendedAttributes;
 	var members:Array<InterfaceMember>;
-	var mixin:Bool;
+	// var mixin:Bool;
 	var ?parent:String;
 }
 
@@ -79,6 +83,7 @@ typedef TypedefType = {
 }
 
 enum Definition {
+	Mixin(i:InterfaceType);
 	Interface(i:InterfaceType);
 	Namespace(n:NamespaceType);
 	Dictionary(d:DictionaryType);
@@ -88,7 +93,7 @@ enum Definition {
 		var args:Array<Argument>;
 	});
 	Typedef(t:TypedefType);
-	Include(included:String, _in:String);
+	Includes(what:String, included:String);
 	Partial(d:Definition);
 }
 

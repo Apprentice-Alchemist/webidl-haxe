@@ -29,9 +29,11 @@ interface GPUSupportedLimits {
     readonly attribute unsigned long maxVertexBufferArrayStride;
     readonly attribute unsigned long maxInterStageShaderComponents;
     readonly attribute unsigned long maxComputeWorkgroupStorageSize;
-    readonly attribute unsigned long maxComputeWorkgroupInvocations;
-    readonly attribute GPUExtent3D maxComputeWorkgroupSize;
-    readonly attribute unsigned long maxComputePerDimensionDispatchSize;
+    readonly attribute unsigned long maxComputeInvocationsPerWorkgroup;
+    readonly attribute unsigned long maxComputeWorkgroupSizeX;
+    readonly attribute unsigned long maxComputeWorkgroupSizeY;
+    readonly attribute unsigned long maxComputeWorkgroupSizeZ;
+    readonly attribute unsigned long maxComputeWorkgroupsPerDimension;
 };
 
 [Exposed=(Window, DedicatedWorker)]
@@ -76,7 +78,7 @@ interface GPUAdapter {
 
 dictionary GPUDeviceDescriptor : GPUObjectDescriptorBase {
     sequence<GPUFeatureName> requiredFeatures = [];
-    record<DOMString, GPUSize32> requiredLimits = {};
+    record<DOMString, GPUSize64> requiredLimits = {};
 };
 
 enum GPUFeatureName {
@@ -185,8 +187,8 @@ typedef [EnforceRange] unsigned long GPUTextureUsageFlags;
 interface GPUTextureUsage {
     const GPUFlagsConstant COPY_SRC          = 0x01;
     const GPUFlagsConstant COPY_DST          = 0x02;
-    const GPUFlagsConstant SHADER_READ       = 0x04;
-    const GPUFlagsConstant STORAGE           = 0x08;
+    const GPUFlagsConstant TEXTURE_BINDING   = 0x04;
+    const GPUFlagsConstant STORAGE_BINDING   = 0x08;
     const GPUFlagsConstant RENDER_ATTACHMENT = 0x10;
 };
 
@@ -322,7 +324,7 @@ dictionary GPUSamplerDescriptor : GPUObjectDescriptorBase {
     GPUFilterMode minFilter = "nearest";
     GPUFilterMode mipmapFilter = "nearest";
     float lodMinClamp = 0;
-    float lodMaxClamp = 0xffffffff; // TODO: What should this be? Was Number.MAX_VALUE.
+    float lodMaxClamp = 32;
     GPUCompareFunction compare;
     [Clamp] unsigned short maxAnisotropy = 1;
 };
@@ -771,8 +773,6 @@ GPUCommandEncoder includes GPUObjectBase;
 
 dictionary GPUCommandEncoderDescriptor : GPUObjectDescriptorBase {
     boolean measureExecutionTime = false;
-
-    // TODO: reusability flag?
 };
 
 dictionary GPUImageDataLayout {
@@ -914,6 +914,12 @@ enum GPUStoreOp {
     "discard"
 };
 
+dictionary GPURenderPassLayout: GPUObjectDescriptorBase {
+    required sequence<GPUTextureFormat> colorFormats;
+    GPUTextureFormat depthStencilFormat;
+    GPUSize32 sampleCount = 1;
+};
+
 [Exposed=(Window, DedicatedWorker)]
 interface GPURenderBundle {
 };
@@ -930,10 +936,9 @@ GPURenderBundleEncoder includes GPUObjectBase;
 GPURenderBundleEncoder includes GPUProgrammablePassEncoder;
 GPURenderBundleEncoder includes GPURenderEncoderBase;
 
-dictionary GPURenderBundleEncoderDescriptor : GPUObjectDescriptorBase {
-    required sequence<GPUTextureFormat> colorFormats;
-    GPUTextureFormat depthStencilFormat;
-    GPUSize32 sampleCount = 1;
+dictionary GPURenderBundleEncoderDescriptor : GPURenderPassLayout {
+    boolean depthReadOnly = false;
+    boolean stencilReadOnly = false;
 };
 
 [Exposed=(Window, DedicatedWorker)]

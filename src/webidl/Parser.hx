@@ -36,6 +36,7 @@ class Parser {
 	public function new(tokens:Array<Token>) {
 		this.tokens = tokens;
 		this.used_tokens = new Array();
+		this.current_token = cast null;
 	}
 
 	static function tokenToString(t:TokenKind) {
@@ -104,15 +105,17 @@ class Parser {
 	}
 
 	inline function token() {
-		current_token = tokens.shift();
+		current_token = cast tokens.shift();
 		used_tokens.push(current_token);
 		return current_token.t;
 	}
 
 	inline function restore() {
 		var t = used_tokens.pop();
-		tokens.unshift(t);
-		current_token = t;
+		if (t == null)
+			throw "";
+		tokens.unshift(cast t);
+		current_token = cast t;
 		return t.t;
 	}
 
@@ -150,7 +153,7 @@ class Parser {
 		}
 	}
 
-	inline function ident(?pos:haxe.PosInfos):String {
+	function ident(?pos:haxe.PosInfos):String {
 		return switch token() {
 			case TIdent(s) | TKeyword(s):
 				s;
@@ -224,6 +227,8 @@ class Parser {
 		var attributes = parseExtendedAttributes();
 		var t = switch token() {
 			case TIdent("undefined"): Undefined;
+			case TIdent("boolean"): Boolean;
+			case TIdent("any"): Any;
 			case TIdent("byte"): Byte;
 			case TIdent("octet"): Octet;
 			case TIdent("short"): Short;
@@ -271,7 +276,11 @@ class Parser {
 				var t = parseType();
 				consume(TRightArrow);
 				Promise(t);
-			case TIdent(s): Ident(s);
+			case TIdent(s):
+				for (t in CType.getConstructors())
+					if (s == t)
+						return CType.createByName(t);
+				Ident(s);
 			case TParenOpen:
 				var types = [];
 				do {
@@ -291,7 +300,7 @@ class Parser {
 	function parseDefinition():Definition {
 		var attributes = parseExtendedAttributes();
 		var partial = match(TKeyword(Partial));
-		return switch token() {
+		var t = switch token() {
 			case TKeyword(k):
 				switch k {
 					case Interface:
@@ -431,14 +440,13 @@ class Parser {
 								}
 							}
 						}
-						Interface({
+						var i = {
 							name: name,
 							parent: parent,
-							mixin: mixin,
 							members: members,
-							attributes: attributes,
-							partial: partial
-						});
+							attributes: attributes
+						};
+						mixin ? Mixin(i) : Interface(i);
 					case Callback:
 						if (match(TKeyword(Interface))) {
 							restore();
@@ -491,7 +499,7 @@ class Parser {
 						}
 						Dictionary({
 							name: name,
-							partial: partial,
+							// partial: partial,
 							attributes: attributes,
 							members: members,
 							parent: parent
@@ -532,7 +540,7 @@ class Parser {
 						];
 						Namespace({
 							name: name,
-							partial: partial,
+							// partial: partial,
 							members: defs
 						});
 					case Typedef:
@@ -540,7 +548,7 @@ class Parser {
 						var name = ident();
 						consume(TSemicolon);
 						Typedef({
-							type_attributes: attributes,
+							// type_attributes: attributes,
 							type: t,
 							name: name
 						});
@@ -550,11 +558,12 @@ class Parser {
 			case TIdent(s) if (match(TKeyword(Includes))):
 				var x = ident();
 				consume(TSemicolon);
-				Include(x, s);
+				Includes(x, s);
 			case _:
 				trace(current_token);
 				throw unexpected();
 		}
+		return partial ? Partial(t) : t;
 	}
 
 	public function parse() {
