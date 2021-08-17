@@ -1,5 +1,6 @@
 -cp src
 -cp out
 -m webidl.Main
+--macro nullSafety("webidl")
 --interp
 # -js out.js

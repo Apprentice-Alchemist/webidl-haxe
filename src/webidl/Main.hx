@@ -14,7 +14,7 @@ class Main {
 		var files = [];
 		var format = false;
 		final handler = Args.generate([@doc("Set output folder")
-			["-o", "--output"] => (arg:String) -> output = new haxe.io.Path(arg).dir,
+			["-o", "--output"] => (arg:String) -> output = arg,
 			@doc("Run the formatter on the output")
 			["--format"] => () -> format = true,
 			_ => (file:String) -> {
@@ -30,7 +30,7 @@ class Main {
 		final haxelib = Sys.getEnv("HAXELIB_RUN") != null;
 		final haxelib_name = Sys.getEnv("HAXELIB_RUN_NAME");
 		if (haxelib)
-			Sys.setCwd(args.pop());
+			Sys.setCwd(cast args.pop());
 		if (args.length == 0) {
 			Sys.print("Usage: ");
 			if (haxelib)
@@ -45,22 +45,27 @@ class Main {
 		final converter = new Converter();
 
 		for (f in files) {
-			if(!FileSystem.exists(f)) Sys.println("File not found : " + f);
+			if (!FileSystem.exists(f))
+				Sys.println("File not found : " + f);
 			final ext = Path.extension(f);
 			final d = Path.directory(f);
 			final name = Path.withoutDirectory(f);
 			if (ext == "idl" || ext == "webidl" || ext == "widl") {
 				var conf:{pack:String} = FileSystem.exists(makePath([d, name + ".json"])) ? Json.parse(File.getContent(makePath([d, name + ".json"]))) : {pack: ""};
 				final defs = Parser.parseString(File.getContent(f), f);
-				converter.addDefinitions(defs, conf.pack == null ? [] : conf.pack.split(".").filter(s -> s != ""));
+				if (defs != null)
+					converter.addDefinitions(defs, conf.pack == null ? [] : conf.pack.split(".").filter(s -> s != ""));
 			}
 		}
 		final printer = new haxe.macro.Printer();
 		for (td in converter.convert()) {
+			if (td.pack == null)
+				td.pack = [];
 			final dir = makePath([output].concat(td.pack));
 			FileSystem.createDirectory(dir);
 			sys.io.File.saveContent(makePath([dir, td.name + ".hx"]), printer.printTypeDefinition(td));
 		}
-		if(format) Sys.command("haxelib run formatter -s " + output);
+		if (format)
+			Sys.command("haxelib run formatter -s " + output);
 	}
 }

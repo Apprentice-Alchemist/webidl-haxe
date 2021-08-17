@@ -40,8 +40,8 @@ typedef InterfaceMember = Named & {
 
 enum InterfaceMemberKind {
 	Const(type:CType, value:Constant);
-	Attribute(type:CType, ?_static:Bool, ?readonly:Bool);
-	Function(ret:CType, args:Array<Argument>, ?_static:Bool);
+	Attribute(type:CType, _static:Bool, readonly:Bool);
+	Function(ret:CType, args:Array<Argument>, _static:Bool);
 }
 
 typedef DictionaryMember = {

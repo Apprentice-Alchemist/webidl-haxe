@@ -1,5 +1,6 @@
 package webidl;
 
+import haxe.macro.Expr;
 import haxe.macro.Expr.Field;
 import haxe.macro.Expr.ComplexType;
 import haxe.macro.Expr.TypeDefinition;
@@ -22,6 +23,10 @@ class Converter {
 	var type_paths = new StringMap<haxe.macro.Expr.TypePath>();
 
 	public function new() {}
+
+	public inline function getTypePath(name:String):TypePath {
+		return type_paths.exists(name) ? cast type_paths.get(name) : throw "assert";
+	}
 
 	public function convert():Array<TypeDefinition> {
 		var ret = [];
@@ -48,7 +53,11 @@ class Converter {
 				continue;
 			}
 			var m = mixins.get(inc.what);
-			i.members = i.members.concat(m.members);
+			if (m == null) {
+				trace("Warning : Could not find mixin " + inc.what);
+			} else {
+				i.members = i.members.concat(m.members);
+			}
 		}
 		// convert types
 		for (i in interfaces)
@@ -63,8 +72,7 @@ class Converter {
 	}
 
 	public function addDefinitions(defs:Array<Definition>, ?pack:Array<String>) {
-		if (pack == null)
-			pack = [];
+		var pack = pack == null ? [] : (cast pack : Array<String>);
 		for (def in defs) {
 			switch def {
 				case Mixin(i):
@@ -130,9 +138,11 @@ class Converter {
 			case Record(s, typeToHaxe(_) => t): macro :DynamicAccess<$t>;
 			case WithAttributes(e, typeToHaxe(_) => t): t; // TODO
 			case Ident(s): 
-				if(type_paths.exists(s))
-					TPath(type_paths.get(s))
-				else {
+				if(type_paths.exists(s)){
+var p = getTypePath(s);
+				if(p == null) throw "assert";
+					TPath(p);
+				}else {
 					trace("Warning : Failed to resolve identifier " + s);
 					macro :Dynamic;
 				}
@@ -140,7 +150,7 @@ class Converter {
 			case Sequence(typeToHaxe(_) => t): macro :Array<$t>;
 			case Object: macro :{};
 			case Symbol: macro :js.lib.Symbol;
-			case Union([for(_ in _) typeToHaxe(_)] => t): t.fold((item, result) -> macro :haxe.extern.EitherType<$result,$item>,t.pop());
+			case Union([for(_ in _) typeToHaxe(_)] => t): t.fold((item, result) -> macro :haxe.extern.EitherType<$result,$item>,cast t.pop());
 			case Any: macro :Any;
 			case Null(typeToHaxe(_) => t): macro :Null<$t>;
 			case ArrayBuffer: macro :js.lib.ArrayBuffer;
@@ -190,9 +200,14 @@ class Converter {
 	}
 
 	function convertInterface(i:InterfaceType):TypeDefinition {
-		final pack = type_paths.get(i.name).pack;
+		final path:TypePath = getTypePath(i.name);
+		final pack = path.pack;
 
-		if (!i.maplike && !i.iterable && !i.setlike && i.members.length > 0 && i.members.foreach(item -> item.kind.match(Const(_, _)))) {
+		if (!i.maplike
+			&& !i.iterable
+			&& !i.setlike
+			&& i.members.length > 0
+			&& i.members.foreach(item -> item.kind.match(Const(_, _)))) {
 			return {
 				pack: pack,
 				name: i.name,
@@ -213,14 +228,14 @@ class Converter {
 							args: [
 								{
 									name: "a",
-									type: TPath(type_paths.get(i.name))
+									type: TPath(path)
 								},
 								{
 									name: "b",
-									type: TPath(type_paths.get(i.name))
+									type: TPath(path)
 								}
 							],
-							ret: TPath(type_paths.get(i.name))
+							ret: TPath(path)
 						}),
 						pos: (macro null).pos,
 						access: [AStatic],
@@ -248,7 +263,7 @@ class Converter {
 					pack: pack,
 					name: i.name,
 					pos: (macro null).pos,
-					kind: TDAlias(i.readonlysetlike ? macro:js.lib.ReadOnlySet<$t> : macro:js.lib.Set<$t>),
+					kind: TDAlias(i.readonlysetlike ? macro : js.lib.ReadOnlySet<$t>:macro:js.lib.Set<$t>),
 					fields: []
 				}
 			}
@@ -256,7 +271,10 @@ class Converter {
 				pack: pack,
 				name: i.name,
 				pos: (macro null).pos,
-				kind: TDClass(i.parent == null ? null : type_paths.get(i.parent), null, false, false, false),
+				kind: TDClass(i.parent == null ? null : try getTypePath(i.parent) catch (_) {
+					trace(i.parent);
+					null;
+				}, null, false, false, false),
 				fields: [
 					for (f in i.members)
 						switch f.kind {
@@ -313,7 +331,7 @@ class Converter {
 	}
 
 	function convertDictionary(e:DictionaryType):TypeDefinition {
-		final path = type_paths.get(e.name);
+		final path:TypePath = getTypePath(e.name);
 		final fields:Array<Field> = [
 			for (m in e.members)
 				{
@@ -332,7 +350,16 @@ class Converter {
 			pack: path.pack,
 			name: e.name,
 			pos: (macro null).pos,
-			kind: TDAlias(TIntersection([TPath(type_paths.get(e.parent)), TAnonymous(fields)])),
+			kind: TDAlias(TIntersection([
+				TPath(try getTypePath(e.parent) catch (_) {
+					trace(e.parent);
+					{
+						pack: [],
+						name: "Dynamic"
+					}
+				}),
+				TAnonymous(fields)
+			])),
 			fields: []
 		} else {
 			pack: path.pack,
@@ -352,8 +379,9 @@ class Converter {
 	}
 
 	function convertEnum(e:EnumType):TypeDefinition {
+		final path:TypePath = getTypePath(e.name);
 		return {
-			pack: type_paths.get(e.name).pack,
+			pack: path.pack,
 			name: e.name,
 			pos: (macro null).pos,
 			kind: TDAbstract(macro:String, [macro:String], [macro:String]),
@@ -375,7 +403,7 @@ class Converter {
 	}
 
 	function convertTypedef(t:TypedefType):TypeDefinition {
-		final path = type_paths.get(t.name);
+		final path = getTypePath(t.name);
 		final r = ~/^(\w+)Flags$/g;
 		if (r.match(t.name)) {
 			final name = r.matched(1);
@@ -384,7 +412,7 @@ class Converter {
 					pack: path.pack,
 					name: t.name,
 					pos: (macro null).pos,
-					kind: TDAlias(TPath(type_paths.get(name))),
+					kind: TDAlias(TPath(getTypePath(name))),
 					fields: []
 				}
 		}

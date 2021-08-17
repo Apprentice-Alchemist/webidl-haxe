@@ -309,14 +309,14 @@ class Parser {
 						var parent = if (match(TColon)) ident() else null;
 						var setlike = false;
 						var readonlyset = false;
-						var settype = null;
+						var settype = cast null;
 
 						var maplike = false;
 						var readonlymap = false;
-						var maptype = null;
+						var maptype = cast null;
 
 						var iterablelike = false;
-						var iterabletype = null;
+						var iterabletype = cast null;
 						consume(TBraceOpen);
 						var members:Array<InterfaceMember> = [];
 						while (!match(TBraceClose, TSemicolon)) {
@@ -342,7 +342,7 @@ class Parser {
 								consume(TSemicolon);
 								members.push({
 									name: "constructor",
-									kind: Function(Undefined, args)
+									kind: Function(Undefined, args, false)
 								});
 							} else if (match(TKeyword(Const))) {
 								var type = parseType();
@@ -351,7 +351,7 @@ class Parser {
 								consume(TSemicolon);
 								members.push({
 									name: name,
-									kind: Const(type, value)
+									kind: Const(type, cast value)
 								});
 							} else {
 								var stringifier = match(TKeyword(Stringifier));
@@ -384,7 +384,7 @@ class Parser {
 											kind: Attribute(type, _static, readonly)
 										});
 									} else if (readonly) {
-										throw new ParserError(tokens.pop().pos, "Expected attribute");
+										throw new ParserError((cast tokens.pop()).pos, "Expected attribute");
 									} else if (match(TKeyword(Getter))) {
 										parseType();
 										switch token() {
@@ -433,7 +433,7 @@ class Parser {
 										consume(TSemicolon);
 										members.push({
 											name: name,
-											kind: Function(type, args)
+											kind: Function(type, args,false)
 										});
 									}
 								}

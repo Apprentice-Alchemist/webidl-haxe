@@ -122,7 +122,7 @@ class Args {
 							opt: arg.opt || arg.value != null,
 							value: $v{arg.value == null ? null : arg.value.getValue()}
 						}
-						return macro $v{arg};
+						return macro cast $v{cast arg};
 					})
 				};
 				while (__index + $v{fArgs.length} > __args.length) {
