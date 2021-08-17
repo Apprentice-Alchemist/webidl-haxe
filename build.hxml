@@ -1,4 +1,5 @@
 -cp src
+-cp out
 -m webidl.Main
 --interp
 # -js out.js

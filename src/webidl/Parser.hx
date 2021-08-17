@@ -22,7 +22,7 @@ class ParserError extends haxe.Exception {
 class Parser {
 	public static function parseString(input:String, file:String) {
 		var tokens = Lexer.lex(input, file);
-		sys.io.File.saveContent("dom.dump", tokens.map(t -> tokenToString(t.t)).join(" "));
+		// sys.io.File.saveContent("dom.dump", tokens.map(t -> tokenToString(t.t)).join(" "));
 		return try new Parser(tokens).parse() catch (e:ParserError) {
 			Sys.println(e.print());
 			null;
@@ -372,7 +372,6 @@ class Parser {
 										consume(TRightArrow, TSemicolon);
 									} else if (match(TKeyword(Iterable))) {
 										iterablelike = true;
-										// readonlyset = readonly;
 										consume(TLeftArrow);
 										iterabletype = parseType();
 										consume(TRightArrow, TSemicolon);
@@ -440,11 +439,20 @@ class Parser {
 								}
 							}
 						}
-						var i = {
+						var i:InterfaceType = {
 							name: name,
 							parent: parent,
 							members: members,
-							attributes: attributes
+							attributes: attributes,
+							setlike: setlike,
+							readonlysetlike: readonlyset,
+							maplike: maplike,
+							readonlymaplike: readonlymap,
+							maptype: maptype,
+							settype: settype,
+							iterable: iterablelike,
+							iterabletype: iterabletype,
+							keyvalueiterable: false
 						};
 						mixin ? Mixin(i) : Interface(i);
 					case Callback:

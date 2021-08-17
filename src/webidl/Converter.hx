@@ -105,12 +105,8 @@ class Converter {
 	}
 
 	function mergeMixin(mixin:InterfaceType, into:InterfaceType):InterfaceType {
-		return {
-			name: into.name,
-			attributes: into.attributes,
-			parent: into.parent,
-			members: into.members.concat(mixin.members)
-		}
+		into.members = into.members.concat(mixin.members);
+		return into;
 	}
 
 	// static var conversions = new Map<String, String>();
@@ -134,9 +130,12 @@ class Converter {
 			case Record(s, typeToHaxe(_) => t): macro :DynamicAccess<$t>;
 			case WithAttributes(e, typeToHaxe(_) => t): t; // TODO
 			case Ident(s): 
-				if(type_paths.exists(s)) TPath(type_paths.get(s)) else {
-				trace("Warning : Failed to resolve identifier " + s);
-				macro :Dynamic;}
+				if(type_paths.exists(s))
+					TPath(type_paths.get(s))
+				else {
+					trace("Warning : Failed to resolve identifier " + s);
+					macro :Dynamic;
+				}
 			
 			case Sequence(typeToHaxe(_) => t): macro :Array<$t>;
 			case Object: macro :{};
@@ -192,7 +191,8 @@ class Converter {
 
 	function convertInterface(i:InterfaceType):TypeDefinition {
 		final pack = type_paths.get(i.name).pack;
-		if (i.members.foreach(item -> item.kind.match(Const(_, _)))) {
+
+		if (!i.maplike && !i.iterable && !i.setlike && i.members.length > 0 && i.members.foreach(item -> item.kind.match(Const(_, _)))) {
 			return {
 				pack: pack,
 				name: i.name,
@@ -241,6 +241,17 @@ class Converter {
 				]
 			};
 		} else {
+			// TODO : make this work like the spec says
+			if (i.setlike && i.settype != null) {
+				var t = typeToHaxe(i.settype);
+				return {
+					pack: pack,
+					name: i.name,
+					pos: (macro null).pos,
+					kind: TDAlias(i.readonlysetlike ? macro:js.lib.ReadOnlySet<$t> : macro:js.lib.Set<$t>),
+					fields: []
+				}
+			}
 			return {
 				pack: pack,
 				name: i.name,
@@ -365,6 +376,18 @@ class Converter {
 
 	function convertTypedef(t:TypedefType):TypeDefinition {
 		final path = type_paths.get(t.name);
+		final r = ~/^(\w+)Flags$/g;
+		if (r.match(t.name)) {
+			final name = r.matched(1);
+			if (type_paths.exists(name))
+				return {
+					pack: path.pack,
+					name: t.name,
+					pos: (macro null).pos,
+					kind: TDAlias(TPath(type_paths.get(name))),
+					fields: []
+				}
+		}
 		return {
 			pack: path.pack,
 			name: t.name,

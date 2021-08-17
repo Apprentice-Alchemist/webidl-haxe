@@ -55,6 +55,15 @@ typedef InterfaceType = {
 	var name:String;
 	var attributes:ExtendedAttributes;
 	var members:Array<InterfaceMember>;
+	var setlike:Bool;
+	var settype:Null<CType>;
+	var maptype:Null<CType>;
+	var iterabletype:Null<CType>;
+	var readonlysetlike:Bool;
+	var maplike:Bool;
+	var readonlymaplike:Bool;
+	var iterable:Bool;
+	var keyvalueiterable:Bool;
 	// var mixin:Bool;
 	var ?parent:String;
 }
