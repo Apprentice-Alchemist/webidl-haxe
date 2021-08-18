@@ -147,7 +147,7 @@ class Converter {
 			case DOMString: macro :String;
 			case USVString: macro :String;
 			case Promise(typeToHaxe(_) => t): macro :js.lib.Promise<$t>;
-			case Record(s, typeToHaxe(_) => t): macro :DynamicAccess<$t>;
+			case Record(s, typeToHaxe(_) => t): macro :haxe.DynamicAccess<$t>;
 			case WithAttributes(e, typeToHaxe(_) => t): t; // TODO
 			case Ident(s): 
 				if(type_paths.exists(s)){
@@ -268,7 +268,15 @@ class Converter {
 				]
 			};
 		} else {
-			// TODO : make this work like the spec says
+			var overloads = new Map<String, Int>();
+			for (f in i.members)
+				switch f.kind {
+					case Function(_, _, _):
+						var v = cast overloads.exists(f.name) ? overloads.get(f.name) : 0;
+						overloads.set(f.name, v + 1);
+					case _:
+						continue;
+				}
 			final fields:Array<Field> = [
 				for (f in i.members)
 					switch f.kind {
@@ -309,15 +317,21 @@ class Converter {
 												name: escape(a.name),
 												opt: a.optional,
 												type: typeToHaxe(a.type),
-												value: a.value == null ? null : valueToExpr(a.value),
+												// value: a.value == null ? null : valueToExpr(a.value),
 												meta: []
 											}
 									],
 									ret: typeToHaxe(ret)
 								}),
 								pos: (macro null).pos,
-								access: _static ? [AStatic] : [],
-								meta: if (escape(f.name) != f.name) [{name: ":native", params: [macro $v{f.name}], pos: cast null}] else []
+								access: (_static ? [AStatic] : []).concat(if ((cast overloads.get(f.name) : Int) > 1) [AOverload] else []),
+								meta: if (escape(f.name) != f.name) [
+									{
+										name: ":native",
+										params: [macro $v{f.name}],
+										pos: cast null
+									}
+								] else []
 							}
 					}
 			];
@@ -328,7 +342,8 @@ class Converter {
 					pack: pack,
 					name: i.name,
 					pos: (macro null).pos,
-					kind: TDAlias(i.readonlysetlike ? macro : js.lib.ReadOnlySet<$t>:macro:js.lib.Set<$t>),
+					// TODO
+					kind: TDAlias(i.readonlysetlike ? macro : js.lib.Set<$t>:macro:js.lib.Set<$t>),
 					fields: []
 				}
 			}
