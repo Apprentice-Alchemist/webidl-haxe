@@ -7,10 +7,6 @@ typedef Position = {
 	var max:Int;
 }
 
-typedef Config = {
-	var ?pack:String;
-}
-
 typedef ExtendedAttributes = Array<ExtendedAttribute>;
 
 typedef ExtendedAttribute = {

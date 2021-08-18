@@ -1,6 +1,8 @@
 -cp src
--cp out
+-cp idl
 -m webidl.Main
 --macro nullSafety("webidl")
---interp
+--macro nullSafety("webidl.Printer",Off)
+--run webidl.Main
+tests
 # -js out.js

@@ -1,5 +1,6 @@
 package webidl;
 
+import haxe.ds.ArraySort;
 import haxe.macro.Expr;
 import haxe.macro.Expr.Field;
 import haxe.macro.Expr.ComplexType;
@@ -11,6 +12,15 @@ using Lambda;
 using StringTools;
 
 class Converter {
+	static function escape(s:String) {
+		return switch s {
+			case "interface", "dynamic", "function", "static", "import", "using":
+				"_" + s;
+			case var s:
+				s;
+		}
+	}
+
 	var interfaces = new StringMap<InterfaceType>();
 	var dictionaries = new StringMap<DictionaryType>();
 	var enums = new StringMap<EnumType>();
@@ -71,8 +81,8 @@ class Converter {
 		return ret;
 	}
 
-	public function addDefinitions(defs:Array<Definition>, ?pack:Array<String>) {
-		var pack = pack == null ? [] : (cast pack : Array<String>);
+	public function addDefinitions(defs:Array<Definition>, config:Config) {
+		var pack = config.pack;
 		for (def in defs) {
 			switch def {
 				case Mixin(i):
@@ -84,7 +94,7 @@ class Converter {
 					});
 					interfaces.set(i.name, i);
 				case Namespace(n):
-					addDefinitions(n.members, pack);
+					addDefinitions(n.members, config);
 				case Dictionary(d):
 					type_paths.set(d.name, {
 						pack: pack,
@@ -110,6 +120,8 @@ class Converter {
 					partials.push(d);
 			}
 		}
+		for (name => path in config.typemap)
+			type_paths.set(name, path);
 	}
 
 	function mergeMixin(mixin:InterfaceType, into:InterfaceType):InterfaceType {
@@ -123,7 +135,7 @@ class Converter {
 			// @formatter:off
 			case Rest(typeToHaxe(_) => t): macro :haxe.extern.Rest<$t>;
 			case Undefined: macro :Void;
-			case Boolean: macro :Void;
+			case Boolean: macro :Bool;
 			case Byte,Octet,Short,Bigint: macro :Int;
 			case Float,Double,UnrestrictedFloat,UnrestrictedDouble: macro:Float;
 			case UnsignedShort: macro :Int;
@@ -139,7 +151,7 @@ class Converter {
 			case WithAttributes(e, typeToHaxe(_) => t): t; // TODO
 			case Ident(s): 
 				if(type_paths.exists(s)){
-var p = getTypePath(s);
+				var p = getTypePath(s);
 				if(p == null) throw "assert";
 					TPath(p);
 				}else {
@@ -162,8 +174,8 @@ var p = getTypePath(s);
 			case Uint16Array: macro :js.lib.Uint16Array;
 			case Uint32Array: macro :js.lib.Uint32Array;
 			case Uint8ClampedArray: macro :js.lib.Uint8ClampedArray;
-			case BigInt64Array: macro :js.lib.BigInt64Array;
-			case BigUint64Array: macro :js.lib.BigUint64Array;
+			case BigInt64Array: macro:Dynamic; //macro :js.lib.BigInt64Array;
+			case BigUint64Array: macro:Dynamic; //macro :js.lib.BigUint64Array;
 			case Float32Array: macro :js.lib.Float32Array;
 			case Float64Array: macro :js.lib.Float64Array;
 			case FrozenArray(typeToHaxe(_) => t): macro :haxe.ds.ReadOnlyArray<$t>;
@@ -257,6 +269,59 @@ var p = getTypePath(s);
 			};
 		} else {
 			// TODO : make this work like the spec says
+			final fields:Array<Field> = [
+				for (f in i.members)
+					switch f.kind {
+						case Const(type, value):
+							{
+								name: escape(f.name),
+								kind: FVar(typeToHaxe(type), constToExpr(value)),
+								pos: (macro null).pos,
+								access: [AInline, AStatic],
+								meta: if (escape(f.name) != f.name) [
+									{
+										name: ":native",
+										params: [macro $v{f.name}],
+										pos: cast null
+									}
+								] else []
+							}
+						case Attribute(type, _static, readonly):
+							var access:Array<haxe.macro.Expr.Access> = [];
+							if (_static)
+								access.push(AStatic);
+							if (readonly)
+								access.push(AFinal);
+							{
+								name: escape(f.name),
+								kind: FVar(typeToHaxe(type)),
+								pos: (macro null).pos,
+								access: access,
+								meta: if (escape(f.name) != f.name) [{name: ":native", params: [macro $v{f.name}], pos: cast null}] else []
+							}
+						case Function(ret, args, _static):
+							{
+								name: f.name == "constructor" ? "new" : escape(f.name),
+								kind: FFun({
+									args: [
+										for (a in args)
+											{
+												name: escape(a.name),
+												opt: a.optional,
+												type: typeToHaxe(a.type),
+												value: a.value == null ? null : valueToExpr(a.value),
+												meta: []
+											}
+									],
+									ret: typeToHaxe(ret)
+								}),
+								pos: (macro null).pos,
+								access: _static ? [AStatic] : [],
+								meta: if (escape(f.name) != f.name) [{name: ":native", params: [macro $v{f.name}], pos: cast null}] else []
+							}
+					}
+			];
+			// for(field in fields)
 			if (i.setlike && i.settype != null) {
 				var t = typeToHaxe(i.settype);
 				return {
@@ -267,6 +332,16 @@ var p = getTypePath(s);
 					fields: []
 				}
 			}
+			ArraySort.sort(fields, (struct1, struct2) -> {
+				var a1:Array<Access> = cast struct1.access == null ? [] : struct1.access;
+				var a2:Array<Access> = cast struct2.access == null ? [] : struct2.access;
+				if (a1.has(AStatic) && !a2.has(AStatic))
+					-1
+				else if (struct1.kind.match(FVar(_, _)) && struct2.kind.match(FFun(_)))
+					-1
+				else
+					0;
+			});
 			return {
 				pack: pack,
 				name: i.name,
@@ -275,49 +350,7 @@ var p = getTypePath(s);
 					trace(i.parent);
 					null;
 				}, null, false, false, false),
-				fields: [
-					for (f in i.members)
-						switch f.kind {
-							case Const(type, value):
-								{
-									name: f.name,
-									kind: FVar(typeToHaxe(type), constToExpr(value)),
-									pos: (macro null).pos,
-									access: [AInline, AStatic]
-								}
-							case Attribute(type, _static, readonly):
-								var access:Array<haxe.macro.Expr.Access> = [];
-								if (_static)
-									access.push(AStatic);
-								if (readonly)
-									access.push(AFinal);
-								{
-									name: f.name,
-									kind: FVar(typeToHaxe(type)),
-									pos: (macro null).pos,
-									access: access
-								}
-							case Function(ret, args, _static):
-								{
-									name: f.name,
-									kind: FFun({
-										args: [
-											for (a in args)
-												{
-													name: a.name,
-													opt: a.optional,
-													type: typeToHaxe(a.type),
-													value: a.value == null ? null : valueToExpr(a.value),
-													meta: []
-												}
-										],
-										ret: typeToHaxe(ret)
-									}),
-									pos: (macro null).pos,
-									access: _static ? [AStatic] : []
-								}
-						}
-				],
+				fields: fields,
 				isExtern: true,
 				meta: [
 					{
@@ -350,16 +383,17 @@ var p = getTypePath(s);
 			pack: path.pack,
 			name: e.name,
 			pos: (macro null).pos,
-			kind: TDAlias(TIntersection([
-				TPath(try getTypePath(e.parent) catch (_) {
+			kind: TDAlias(TExtend([
+				try
+					getTypePath(e.parent)
+				catch (_) {
 					trace(e.parent);
 					{
 						pack: [],
 						name: "Dynamic"
 					}
-				}),
-				TAnonymous(fields)
-			])),
+				}
+			], fields)),
 			fields: []
 		} else {
 			pack: path.pack,

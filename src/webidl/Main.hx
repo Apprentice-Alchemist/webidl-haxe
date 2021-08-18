@@ -51,13 +51,13 @@ class Main {
 			final d = Path.directory(f);
 			final name = Path.withoutDirectory(f);
 			if (ext == "idl" || ext == "webidl" || ext == "widl") {
-				var conf:{pack:String} = FileSystem.exists(makePath([d, name + ".json"])) ? Json.parse(File.getContent(makePath([d, name + ".json"]))) : {pack: ""};
+				var conf = FileSystem.exists(makePath([d, name + ".json"])) ? Json.parse(File.getContent(makePath([d, name + ".json"]))) : null;
 				final defs = Parser.parseString(File.getContent(f), f);
 				if (defs != null)
-					converter.addDefinitions(defs, conf.pack == null ? [] : conf.pack.split(".").filter(s -> s != ""));
+					converter.addDefinitions(defs, Config.fromJson(conf));
 			}
 		}
-		final printer = new haxe.macro.Printer();
+		final printer = new webidl.Printer();
 		for (td in converter.convert()) {
 			if (td.pack == null)
 				td.pack = [];

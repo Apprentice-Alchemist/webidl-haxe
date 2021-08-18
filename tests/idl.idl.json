@@ -1,0 +1,7 @@
+{
+    "pack":"js.lib",
+    "typemap": {
+        "DOMException":"js.dom.DOMException",
+        "DOMTimeStamp": "js.dom.DOMTimeStamp"
+    }
+}
