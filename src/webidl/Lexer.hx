@@ -20,7 +20,7 @@ class LexerError extends haxe.Exception {
 enum abstract Keyword(String) to String {
 	public static final ALL_KEYWORDS = [
 		Async, Attribute, Callback, Const, Constructor, Deleter, Dictionary, Enum, Getter, Includes, Inherit, Interface, Iterable, Maplike, Mixin, Namespace,
-		Partial, Readonly, Required, Setlike, Setter, Static, Stringifier, Typedef, Unrestricted,
+		Partial, Readonly, Required, Setlike, Setter, Static, Stringifier, Typedef, Unrestricted, Implements
 	];
 	var Async = "async";
 	var Attribute = "attribute";
@@ -47,6 +47,7 @@ enum abstract Keyword(String) to String {
 	var Stringifier = "stringifier";
 	var Typedef = "typedef";
 	var Unrestricted = "unrestricted";
+	var Implements = "implements";
 }
 
 typedef Token = {
@@ -182,6 +183,11 @@ class Lexer {
 				while (next() != "\n".code) {}
 				line++;
 				linepos = 0;
+				return token();
+			case "/".code if (match("*")):
+				while (!match("*/")) {
+					incpos();
+				}
 				return token();
 			case ".".code if (match("..")): TDotDotDot;
 			case "-".code if (match("Infinity")): TIdent("-Infinity");

@@ -35,7 +35,7 @@ class Converter {
 	public function new() {}
 
 	public inline function getTypePath(name:String):TypePath {
-		return type_paths.exists(name) ? cast type_paths.get(name) : throw "assert";
+		return type_paths.exists(name) ? cast type_paths.get(name) : {pack: [], name: name};
 	}
 
 	public function convert():Array<TypeDefinition> {
@@ -43,16 +43,27 @@ class Converter {
 		// resolve partials
 		for (p in partials)
 			switch p {
-				case Interface(part):
+				case Mixin(part) | Interface(part):
 					var i = interfaces.get(part.name);
 					if (i == null) {
-						trace("unknown interface", part.name);
+						interfaces.set(part.name, part);
 						continue;
+					} else {
+						i.attributes = i.attributes.concat(part.attributes);
+						i.members = i.members.concat(part.members);
 					}
-					i.attributes = i.attributes.concat(part.attributes);
-					i.members = i.members.concat(part.members);
+				case Dictionary(part): {
+					var d = dictionaries.get(part.name);
+					if(d == null) {
+						dictionaries.set(part.name,part);
+					} else {
+						d.attributes = d.attributes.concat(part.attributes);
+						d.members = d.members.concat(part.members);
+					}
+				}
 				case Namespace(n): // TODO
-				case _:
+				case d:
+					trace(d);
 					throw "partials should be interfaces or namespaces";
 			}
 		// mix mixins
@@ -94,7 +105,39 @@ class Converter {
 					});
 					interfaces.set(i.name, i);
 				case Namespace(n):
-					addDefinitions(n.members, config);
+					if (n.members.foreach(i -> i.match(InterfaceMember({name: _, kind: Const(_, _)})))) {
+						type_paths.set(n.name, {
+							pack: pack,
+							name: n.name
+						});
+						interfaces.set(n.name, {
+							name: n.name,
+							attributes: [],
+							members: [
+								for (member in n.members)
+									switch member {
+										case InterfaceMember({name: name, kind: Const(type, value)}):
+											{
+												name: name,
+												kind: Const(type, value)
+											}
+										case _:
+											throw "assert";
+									}
+							],
+							setlike: false,
+							settype: null,
+							maptype: null,
+							iterabletype: null,
+							readonlysetlike: null,
+							maplike: false,
+							readonlymaplike: false,
+							iterable: false,
+							keyvalueiterable: false
+						});
+					} else {
+						addDefinitions(n.members, config);
+					}
 				case Dictionary(d):
 					type_paths.set(d.name, {
 						pack: pack,
@@ -118,6 +161,7 @@ class Converter {
 					includes.push({what: what, included: included});
 				case Partial(d):
 					partials.push(d);
+				case InterfaceMember(i):
 			}
 		}
 		for (name => path in config.typemap)
@@ -155,7 +199,7 @@ class Converter {
 				if(p == null) throw "assert";
 					TPath(p);
 				}else {
-					trace("Warning : Failed to resolve identifier " + s);
+					// trace("Warning : Failed to resolve identifier " + s);
 					macro :Dynamic;
 				}
 			
@@ -219,7 +263,7 @@ class Converter {
 			&& !i.iterable
 			&& !i.setlike
 			&& i.members.length > 0
-			&& i.members.foreach(item -> item.kind.match(Const(_, _)))) {
+			&& i.members.foreach(item -> item != null && item.kind.match(Const(_, _)))) {
 			return {
 				pack: pack,
 				name: i.name,
@@ -270,16 +314,17 @@ class Converter {
 		} else {
 			var overloads = new Map<String, Int>();
 			for (f in i.members)
-				switch f.kind {
-					case Function(_, _, _):
-						var v = cast overloads.exists(f.name) ? overloads.get(f.name) : 0;
-						overloads.set(f.name, v + 1);
-					case _:
-						continue;
-				}
+				if (f != null)
+					switch f.kind {
+						case Function(_, _, _):
+							var v = cast overloads.exists(f.name) ? overloads.get(f.name) : 0;
+							overloads.set(f.name, v + 1);
+						case _:
+							continue;
+					}
 			final fields:Array<Field> = [
 				for (f in i.members)
-					switch f.kind {
+					if (f != null) switch f.kind {
 						case Const(type, value):
 							{
 								name: escape(f.name),
@@ -333,6 +378,16 @@ class Converter {
 									}
 								] else []
 							}
+						case Iterable(readonly, type):
+							continue;
+						case Maplike(readonly, type):
+							continue;
+						case Setlike(readonly, type):
+							continue;
+						case Deleter:
+							continue;
+						case Getter, Setter:
+							continue;
 					}
 			];
 			// for(field in fields)
@@ -362,7 +417,7 @@ class Converter {
 				name: i.name,
 				pos: (macro null).pos,
 				kind: TDClass(i.parent == null ? null : try getTypePath(i.parent) catch (_) {
-					trace(i.parent);
+					// trace(i.parent);
 					null;
 				}, null, false, false, false),
 				fields: fields,
@@ -402,7 +457,7 @@ class Converter {
 				try
 					getTypePath(e.parent)
 				catch (_) {
-					trace(e.parent);
+					// trace(e.parent);
 					{
 						pack: [],
 						name: "Dynamic"

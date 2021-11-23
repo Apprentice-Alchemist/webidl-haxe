@@ -13,7 +13,8 @@ import haxe.ds.StringMap;
 	public var typemap:Map<String, haxe.macro.Expr.TypePath> = [];
 
 	public static function fromJson(j:Null<{pack:String, typemap:DynamicAccess<String>}>):Config {
-        if(j == null) return {};
+		if (j == null)
+			return {};
 		return {
 			pack: j.pack == null ? [] : j.pack.split(".").filter(s -> s != ""),
 			typemap: j.typemap == null ? [] : [

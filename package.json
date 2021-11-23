@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@webref/idl": "^2.8.1"
+  }
+}

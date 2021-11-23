@@ -4,5 +4,5 @@
 --macro nullSafety("webidl")
 --macro nullSafety("webidl.Printer",Off)
 --run webidl.Main
-tests
+node_modules/@webref/idl
 # -js out.js

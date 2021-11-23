@@ -1,5 +1,7 @@
 package webidl;
 
+import webidl.Parser;
+import webidl.Lexer.LexerError;
 import haxe.Json;
 import haxe.io.Path;
 import sys.FileSystem;
@@ -52,7 +54,18 @@ class Main {
 			final name = Path.withoutDirectory(f);
 			if (ext == "idl" || ext == "webidl" || ext == "widl") {
 				var conf = FileSystem.exists(makePath([d, name + ".json"])) ? Json.parse(File.getContent(makePath([d, name + ".json"]))) : null;
-				final defs = Parser.parseString(File.getContent(f), f);
+				trace(f);
+				final defs = try Parser.parseString(File.getContent(f), f) catch (e:LexerError) {
+					trace(e.print());
+					trace(e.details());
+					Sys.exit(1);
+					null;
+				} catch(e:ParserError) {
+					trace(e.print());
+					trace(e.details());
+					Sys.exit(1);
+					null;
+				}
 				if (defs != null)
 					converter.addDefinitions(defs, Config.fromJson(conf));
 			}

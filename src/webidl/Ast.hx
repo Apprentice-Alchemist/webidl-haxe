@@ -38,6 +38,12 @@ enum InterfaceMemberKind {
 	Const(type:CType, value:Constant);
 	Attribute(type:CType, _static:Bool, readonly:Bool);
 	Function(ret:CType, args:Array<Argument>, _static:Bool);
+	Setlike(readonly:Bool,type:CType);
+	Maplike(readonly:Bool, type:CType);
+	Iterable(readonly:Bool,type:CType);
+	Deleter;
+	Setter;
+	Getter;
 }
 
 typedef DictionaryMember = {
@@ -100,6 +106,7 @@ enum Definition {
 	Typedef(t:TypedefType);
 	Includes(what:String, included:String);
 	Partial(d:Definition);
+	InterfaceMember(i:InterfaceMember);
 }
 
 typedef Argument = {

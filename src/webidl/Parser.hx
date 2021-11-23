@@ -1,6 +1,5 @@
 package webidl;
 
-import haxe.ds.GenericStack;
 import webidl.Lexer;
 import webidl.Ast;
 
@@ -22,11 +21,7 @@ class ParserError extends haxe.Exception {
 class Parser {
 	public static function parseString(input:String, file:String) {
 		var tokens = Lexer.lex(input, file);
-		// sys.io.File.saveContent("dom.dump", tokens.map(t -> tokenToString(t.t)).join(" "));
-		return try new Parser(tokens).parse() catch (e:ParserError) {
-			Sys.println(e.print());
-			null;
-		}
+		return new Parser(tokens).parse();
 	}
 
 	var current_token:Token;
@@ -123,7 +118,7 @@ class Parser {
 		if (t == null)
 			t = current_token;
 		// trace([for (t in used_tokens) tokenToString(t.t)].concat([tokenToString(tokens[0].t), tokenToString(tokens[1].t)]).join(" "));
-		haxe.Log.trace("unexpected : " + t.t, pos);
+		haxe.Log.trace(used_tokens[used_tokens.length - 2], pos);
 		return new ParserError(t.pos, "Unexpected " + tokenToString(t.t));
 	}
 
@@ -147,7 +142,6 @@ class Parser {
 			if (comp(t, _t)) {
 				continue;
 			} else {
-				// trace([for (t in used_tokens) t.t].join(" "));
 				throw new ParserError(current_token.pos, 'Unexpected ${tokenToString(_t)}, expected ${tokenToString(t)}');
 			}
 		}
@@ -193,17 +187,34 @@ class Parser {
 			var name = ident();
 			var kind:ExtendedAttributeKind = if (match(TEqual)) {
 				switch token() {
-					case TIdent(s): ExtendedAttributeIdent(s);
+					case TString(s), TIdent(s):
+						if (match(TParenOpen)) {
+							restore();
+							ExtendedAttributeNamedArgList(name, parseArguments());
+						} else ExtendedAttributeIdent(s);
 					case TParenOpen:
-						var l = [];
-						do {
-							l.push(ident());
-						} while (match(TComma));
-						consume(TParenClose);
-						ExtendedAttributeIdentList(l);
+						if (tokens[0].t.match(TIdent(_)) && tokens[1].t.match(TComma | TParenClose)) {
+							var l = [];
+							do {
+								l.push(ident());
+							} while (match(TComma));
+							consume(TParenClose);
+							ExtendedAttributeIdentList(l);
+						} else {
+							restore();
+							ExtendedAttributeNamedArgList(name, parseArguments());
+						}
 					case var t:
-						throw new ParserError(current_token.pos, "Did not expect this token.");
+						throw unexpected(current_token);
+						// throw new ParserError(current_token.pos, 'Did not expect this token : $t.');
 				}
+			} else if (match(TParenOpen)) {
+				var l = [];
+				do {
+					l.push(ident());
+				} while (match(TComma));
+				consume(TParenClose);
+				ExtendedAttributeIdentList(l);
 			} else {
 				ExtendedAttributeNoArg;
 			}
@@ -276,11 +287,17 @@ class Parser {
 				var t = parseType();
 				consume(TRightArrow);
 				Promise(t);
+			case TIdent("ObservableArray"):
+				consume(TLeftArrow);
+				var t = parseType();
+				consume(TRightArrow);
+				Ident("ObservableArray");
 			case TIdent(s):
+				var c:Null<CType> = null;
 				for (t in CType.getConstructors())
 					if (s == t)
-						return CType.createByName(t);
-				Ident(s);
+						c = CType.createByName(t);
+				c == null ? Ident(s) : (c : CType);
 			case TParenOpen:
 				var types = [];
 				do {
@@ -295,6 +312,153 @@ class Parser {
 		t = if (match(TDotDotDot)) Rest(t) else t;
 		t = if (attributes.length > 0) WithAttributes(attributes, t) else t;
 		return t;
+	}
+
+	function parseArguments() {
+		var args:Array<Argument> = [];
+		if (match(TParenOpen)) {
+			if (!match(TParenClose)) {
+				do {
+					var optional = match(TIdent("optional"));
+					var t = parseType();
+					var name = ident();
+					var value = if (match(TEqual)) parseValue() else null;
+					args.push({
+						name: name,
+						type: t,
+						optional: optional,
+						value: value
+					});
+				} while (match(TComma));
+				consume(TParenClose);
+			}
+		}
+		return args;
+	}
+
+	function parseInterfaceMember():InterfaceMember {
+		var att = parseExtendedAttributes();
+		if (match(TKeyword(Constructor))) {
+			var args:Array<Argument> = parseArguments();
+			consume(TSemicolon);
+			return {
+				name: "constructor",
+				kind: Function(Undefined, args, false)
+			};
+		} else if (match(TKeyword(Const))) {
+			var type = parseType();
+			var name = ident();
+			var value = if (match(TEqual)) parseConstant() else null;
+			consume(TSemicolon);
+			return {
+				name: name,
+				kind: Const(type, cast value)
+			};
+		} else {
+			var stringifier = match(TKeyword(Stringifier));
+			var inherit = match(TKeyword(Inherit));
+			var async = match(TKeyword(Async));
+			if (!match(TSemicolon)) {
+				var _static = !stringifier && match(TKeyword(Static));
+				var readonly = match(TKeyword(Readonly));
+
+				if (match(TKeyword(Deleter))) {
+					parseType();
+					switch token() {
+						case TIdent(_):
+							consume(TParenOpen);
+						case TParenOpen:
+						case _: throw unexpected();
+					}
+					var type = parseType();
+					ident();
+					consume(TParenClose, TSemicolon);
+					return {name: null, kind: Deleter};
+				} else if (match(TKeyword(Iterable))) {
+					consume(TLeftArrow);
+					var type = parseType();
+					if (match(TComma)) {
+						parseType();
+					}
+					consume(TRightArrow);
+					parseArguments();
+					consume(TSemicolon);
+					return {name: null, kind: Iterable(readonly, type)};
+				} else if (match(TKeyword(Setlike))) {
+					consume(TLeftArrow);
+					var type = parseType();
+					consume(TRightArrow, TSemicolon);
+					return {name: null, kind: Setlike(readonly, type)}
+				} else if (match(TKeyword(Maplike))) {
+					consume(TLeftArrow);
+					var type = parseType();
+					if (match(TComma)) {
+						parseType();
+					}
+					consume(TRightArrow, TSemicolon);
+					return {name: null, kind: Maplike(readonly, type)}
+				} else if (match(TKeyword(Attribute))) {
+					var type = parseType();
+					var name = ident();
+					consume(TSemicolon);
+					return {
+						name: name,
+						kind: Attribute(type, _static, readonly)
+					};
+				} else if (readonly) {
+					trace(current_token);
+					throw new ParserError((cast tokens.pop()).pos, "Expected attribute");
+				} else if (match(TKeyword(Getter))) {
+					parseType();
+					switch token() {
+						case TIdent(s):
+							consume(TParenOpen);
+						case TParenOpen:
+						case _:
+							throw unexpected();
+					}
+					parseType();
+					ident();
+					consume(TParenClose, TSemicolon);
+					Getter;
+				} else if (match(TKeyword(Setter))) {
+					parseType();
+					switch token() {
+						case TIdent(s):
+							consume(TParenOpen);
+						case TParenOpen:
+
+						case _:
+							throw unexpected();
+					}
+					parseType();
+					ident();
+					if (match(TComma)) {
+						parseType();
+						ident();
+					}
+					consume(TParenClose);
+					Setter;
+				} else if (false) {
+					parseType();
+					ident();
+					consume(TComma);
+					parseType();
+					ident();
+					consume(TParenClose, TSemicolon);
+				} else {
+					var type = parseType();
+					var name = ident();
+					var args:Array<Argument> = parseArguments();
+					consume(TSemicolon);
+					return {
+						name: name,
+						kind: Function(type, args, false)
+					};
+				}
+			}
+		}
+		return cast null;
 	}
 
 	function parseDefinition():Definition {
@@ -317,125 +481,15 @@ class Parser {
 
 						var iterablelike = false;
 						var iterabletype = cast null;
-						consume(TBraceOpen);
 						var members:Array<InterfaceMember> = [];
-						while (!match(TBraceClose, TSemicolon)) {
-							var att = parseExtendedAttributes();
-							if (match(TKeyword(Constructor))) {
-								var args:Array<Argument> = [];
-								consume(TParenOpen);
-								if (!match(TParenClose)) {
-									do {
-										var optional = match(TIdent("optional"));
-										var t = parseType();
-										var name = ident();
-										var value = if (match(TEqual)) parseValue() else null;
-										args.push({
-											name: name,
-											type: t,
-											optional: optional,
-											value: value
-										});
-									} while (match(TComma));
-									consume(TParenClose);
-								}
-								consume(TSemicolon);
-								members.push({
-									name: "constructor",
-									kind: Function(Undefined, args, false)
-								});
-							} else if (match(TKeyword(Const))) {
-								var type = parseType();
-								var name = ident();
-								var value = if (match(TEqual)) parseConstant() else null;
-								consume(TSemicolon);
-								members.push({
-									name: name,
-									kind: Const(type, cast value)
-								});
-							} else {
-								var stringifier = match(TKeyword(Stringifier));
-								if (!match(TSemicolon)) {
-									var _static = !stringifier && match(TKeyword(Static));
-									var readonly = match(TKeyword(Readonly));
-									if (match(TKeyword(Setlike))) {
-										setlike = true;
-										readonlyset = readonly;
-										consume(TLeftArrow);
-										settype = parseType();
-										consume(TRightArrow, TSemicolon);
-									} else if (match(TKeyword(Maplike))) {
-										maplike = true;
-										readonlymap = readonly;
-										consume(TLeftArrow);
-										maptype = parseType();
-										consume(TRightArrow, TSemicolon);
-									} else if (match(TKeyword(Iterable))) {
-										iterablelike = true;
-										consume(TLeftArrow);
-										iterabletype = parseType();
-										consume(TRightArrow, TSemicolon);
-									} else if (match(TKeyword(Attribute))) {
-										var type = parseType();
-										var name = ident();
-										consume(TSemicolon);
-										members.push({
-											name: name,
-											kind: Attribute(type, _static, readonly)
-										});
-									} else if (readonly) {
-										throw new ParserError((cast tokens.pop()).pos, "Expected attribute");
-									} else if (match(TKeyword(Getter))) {
-										parseType();
-										switch token() {
-											case TIdent(s):
-												consume(TParenOpen);
-											case TParenOpen:
-											case _: throw unexpected();
-										}
-										parseType();
-										ident();
-										consume(TParenClose, TSemicolon);
-									} else if (match(TKeyword(Setter))) {
-										parseType();
-										switch token() {
-											case TIdent(s):
-												consume(TParenOpen);
-											case TParenOpen:
-											case _: throw unexpected();
-										}
-										parseType();
-										ident();
-										consume(TComma);
-										parseType();
-										ident();
-										consume(TParenClose, TSemicolon);
-									} else {
-										var type = parseType();
-										var name = ident();
-										var args:Array<Argument> = [];
-										consume(TParenOpen);
-										if (!match(TParenClose)) {
-											do {
-												var optional = match(TIdent("optional"));
-												var t = parseType();
-												var name = ident();
-												var value = if (match(TEqual)) parseValue() else null;
-												args.push({
-													name: name,
-													type: t,
-													optional: optional,
-													value: value
-												});
-											} while (match(TComma));
-											consume(TParenClose);
-										}
-										consume(TSemicolon);
-										members.push({
-											name: name,
-											kind: Function(type, args,false)
-										});
-									}
+						if (match(TSemicolon)) {
+							// turns out empty interfaces are a thing in firefox's webidl's
+						} else {
+							consume(TBraceOpen);
+							while (!match(TBraceClose, TSemicolon)) {
+								var att = parseExtendedAttributes();
+								{
+									members.push(parseInterfaceMember());
 								}
 							}
 						}
@@ -493,6 +547,7 @@ class Parser {
 						var members = [];
 						consume(TBraceOpen);
 						while (!match(TBraceClose, TSemicolon)) {
+							parseExtendedAttributes();
 							var required = match(TKeyword(Required));
 							var type = parseType();
 							var name = ident();
@@ -541,6 +596,7 @@ class Parser {
 						});
 					case Namespace:
 						var name = ident();
+						consume(TBraceOpen);
 						var defs = [
 							while (!match(TBraceClose, TSemicolon)) {
 								parseDefinition();
@@ -548,7 +604,6 @@ class Parser {
 						];
 						Namespace({
 							name: name,
-							// partial: partial,
 							members: defs
 						});
 					case Typedef:
@@ -560,16 +615,24 @@ class Parser {
 							type: t,
 							name: name
 						});
+					// case Const:
+					// 	var type = parseType();
+					// 	var name = ident();
+					// 	consume(TEqual);
+					// 	var value = parseConstant();
+					// 	consume(TSemicolon);
+					// 	Definition.Const(name, type, value);
 					case _:
-						throw unexpected();
+						restore();
+						InterfaceMember(parseInterfaceMember());
 				}
-			case TIdent(s) if (match(TKeyword(Includes))):
+			case TIdent(s) if (match(TKeyword(Includes)) || match(TKeyword(Implements))):
 				var x = ident();
 				consume(TSemicolon);
 				Includes(x, s);
 			case _:
-				trace(current_token);
-				throw unexpected();
+				restore();
+				InterfaceMember(parseInterfaceMember());
 		}
 		return partial ? Partial(t) : t;
 	}
