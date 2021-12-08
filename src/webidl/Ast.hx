@@ -1,6 +1,6 @@
 package webidl;
 
-typedef Position = {
+typedef Pos = {
 	var file:String;
 	var line:Int;
 	var min:Int;

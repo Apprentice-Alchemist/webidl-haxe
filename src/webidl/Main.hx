@@ -15,7 +15,8 @@ class Main {
 		var output = "idl";
 		var files = [];
 		var format = false;
-		final handler = Args.generate([@doc("Set output folder")
+		final handler = Args.generate([
+			@doc("Set output folder")
 			["-o", "--output"] => (arg:String) -> output = arg,
 			@doc("Run the formatter on the output")
 			["--format"] => () -> format = true,
@@ -44,8 +45,8 @@ class Main {
 			Sys.exit(0);
 		} else
 			handler.parse(args);
-		final converter = new Converter();
-
+		final config = Config.fromJSON(Json.parse(File.getContent("config.json")));
+		final converter = new Converter(config);
 		for (f in files) {
 			if (!FileSystem.exists(f))
 				Sys.println("File not found : " + f);
@@ -54,30 +55,32 @@ class Main {
 			final name = Path.withoutDirectory(f);
 			if (ext == "idl" || ext == "webidl" || ext == "widl") {
 				var conf = FileSystem.exists(makePath([d, name + ".json"])) ? Json.parse(File.getContent(makePath([d, name + ".json"]))) : null;
-				trace(f);
 				final defs = try Parser.parseString(File.getContent(f), f) catch (e:LexerError) {
-					trace(e.print());
-					trace(e.details());
+					Sys.println(e.print());
+					Sys.println(e.details());
 					Sys.exit(1);
 					null;
-				} catch(e:ParserError) {
-					trace(e.print());
-					trace(e.details());
+				} catch (e:ParserError) {
+					Sys.println(e.print());
+					Sys.println(e.details());
 					Sys.exit(1);
 					null;
 				}
 				if (defs != null)
-					converter.addDefinitions(defs, Config.fromJson(conf));
+					converter.addDefinitions(defs);
 			}
 		}
 		final printer = new webidl.Printer();
+		final file = sys.io.File.write("out/Dom.hx");
+		file.writeString("package;");
 		for (td in converter.convert()) {
 			if (td.pack == null)
 				td.pack = [];
 			final dir = makePath([output].concat(td.pack));
 			FileSystem.createDirectory(dir);
-			sys.io.File.saveContent(makePath([dir, td.name + ".hx"]), printer.printTypeDefinition(td));
+			file.writeString(printer.printTypeDefinition(td, false));
 		}
+		file.close();
 		if (format)
 			Sys.command("haxelib run formatter -s " + output);
 	}

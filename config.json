@@ -1,0 +1,10 @@
+{
+    "Event": {
+        "exclude": [
+            "srcElement",
+            "cancelBubble",
+            "returnValue",
+            "initEvent"
+        ]
+    }
+}

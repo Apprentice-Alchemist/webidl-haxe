@@ -4,26 +4,17 @@ import haxe.macro.MacroStringTools;
 import haxe.DynamicAccess;
 import haxe.ds.StringMap;
 
+@:publicFields
 @:structInit class Config {
-	public var pack:Array<String> = [];
+	var types:Map<String, {
+		exclude:Array<String>
+	}>;
 
-	/**
-	 * Map from webidl names to haxe type paths.
-	 */
-	public var typemap:Map<String, haxe.macro.Expr.TypePath> = [];
-
-	public static function fromJson(j:Null<{pack:String, typemap:DynamicAccess<String>}>):Config {
-		if (j == null)
-			return {};
-		return {
-			pack: j.pack == null ? [] : j.pack.split(".").filter(s -> s != ""),
-			typemap: j.typemap == null ? [] : [
-				for (name => path in j.typemap)
-					name => {
-						var pack = path.split(".");
-						{pack: pack, name: pack.pop(), params: []};
-					}
-			]
+	public static function fromJSON(d:Any):Config {
+		final types = new Map();
+		for (field in Reflect.fields(d)) {
+			types.set(field, Reflect.field(d, field));
 		}
+		return {types: types};
 	}
 }

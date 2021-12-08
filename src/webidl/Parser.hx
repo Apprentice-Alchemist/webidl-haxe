@@ -4,10 +4,10 @@ import webidl.Lexer;
 import webidl.Ast;
 
 class ParserError extends haxe.Exception {
-	final pos:Position;
+	final pos:Pos;
 	final msg:String;
 
-	public function new(pos:Position, message:String) {
+	public function new(pos:Pos, message:String) {
 		this.pos = pos;
 		this.msg = message;
 		super(message);
@@ -20,8 +20,14 @@ class ParserError extends haxe.Exception {
 
 class Parser {
 	public static function parseString(input:String, file:String) {
+		// final t = Sys.time();
 		var tokens = Lexer.lex(input, file);
-		return new Parser(tokens).parse();
+		// Sys.println('$file: lexer: ${Sys.time() - t}s');
+		// trace(tokens.map(t -> t.t)[0]);
+		// final t = Sys.time();
+		final ast = new Parser(tokens).parse();
+		// Sys.println('$file: parser: ${Sys.time() - t}s');
+		return ast;
 	}
 
 	var current_token:Token;
@@ -142,6 +148,7 @@ class Parser {
 			if (comp(t, _t)) {
 				continue;
 			} else {
+				trace(used_tokens[used_tokens.length - 2]);
 				throw new ParserError(current_token.pos, 'Unexpected ${tokenToString(_t)}, expected ${tokenToString(t)}');
 			}
 		}
@@ -151,7 +158,8 @@ class Parser {
 		return switch token() {
 			case TIdent(s) | TKeyword(s):
 				s;
-			case _:
+			case var t:
+				trace(t);
 				throw new ParserError(current_token.pos, "Expected identifier");
 		}
 	}

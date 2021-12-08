@@ -1,8 +1,8 @@
 -cp src
 -cp idl
+-cp out
 -m webidl.Main
 --macro nullSafety("webidl")
 --macro nullSafety("webidl.Printer",Off)
 --run webidl.Main
-node_modules/@webref/idl
-# -js out.js
+node_modules/@webref/idl/

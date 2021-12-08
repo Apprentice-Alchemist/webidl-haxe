@@ -1,12 +1,13 @@
 package webidl;
 
-import webidl.Ast.Position;
+import haxe.ds.GenericStack;
+import webidl.Ast.Pos;
 
 class LexerError extends haxe.Exception {
-	final pos:Position;
+	final pos:Pos;
 	final msg:String;
 
-	public function new(pos:Position, message:String) {
+	public function new(pos:Pos, message:String) {
 		this.pos = pos;
 		this.msg = message;
 		super(message);
@@ -52,7 +53,7 @@ enum abstract Keyword(String) to String {
 
 typedef Token = {
 	var t:TokenKind;
-	var pos:webidl.Ast.Position;
+	var pos:webidl.Ast.Pos;
 }
 
 enum TokenKind {
@@ -83,10 +84,6 @@ class Lexer {
 		return new Lexer(input, filename)._lex();
 	}
 
-	static final ident_reg = ~/^[_-]?[A-Za-z][0-9A-Z_a-z-]*/m;
-	static final integer_reg = ~/^-?([1-9][0-9]*|0[Xx][0-9A-Fa-f]+|0[0-7]*)/m;
-	static final decimal_reg = ~/^-?(([0-9]+\.[0-9]*|[0-9]*\.[0-9]+)([Ee][+-]?[0-9]+)?|[0-9]+[Ee][+-]?[0-9]+)/m;
-
 	var pos:Int;
 	var line:Int;
 	var linepos:Int;
@@ -102,25 +99,44 @@ class Lexer {
 		this.linepos = 1;
 	}
 
-	function incpos() {
+	var posStack:GenericStack<{pos:Int, line:Int, linepos:Int}> = new GenericStack();
+
+	function save() {
+		posStack.add({
+			pos: pos,
+			line: line,
+			linepos: linepos
+		});
+	}
+
+	function restore() {
+		final state = posStack.pop();
+		if (state != null) {
+			pos = state.pos;
+			line = state.line;
+			linepos = state.linepos;
+		}
+	}
+
+	inline function incpos() {
 		linepos++;
 		return pos++;
 	}
 
-	function incline() {
+	inline function incline() {
 		line++;
 		linepos = 1;
 		return pos++;
 	}
 
-	function next()
-		return input.charCodeAt(incpos());
+	inline function next():Int
+		return cast input.charCodeAt(incpos());
 
-	function current()
-		return input.charCodeAt(pos);
+	inline function current():Int
+		return cast input.charCodeAt(pos);
 
-	function peek()
-		return input.charCodeAt(pos + 1);
+	inline function peek():Int
+		return cast input.charCodeAt(pos + 1);
 
 	function eatWhitespace() {
 		while (true) {
@@ -136,15 +152,16 @@ class Lexer {
 	}
 
 	function match(s:String):Bool {
-		if (input.substr(pos, s.length) == s) {
-			pos += s.length;
-			linepos += s.length;
-			return true;
+		for (i in 0...s.length) {
+			if (input.charCodeAt(pos + i) != s.charCodeAt(i))
+				return false;
 		}
-		return false;
+		pos += s.length;
+		linepos += s.length;
+		return true;
 	}
 
-	function readStringUntil(ec:Int) {
+	inline function readStringUntil(ec:Int) {
 		var s = new StringBuf();
 		while (true) {
 			var c = next();
@@ -159,11 +176,42 @@ class Lexer {
 		return s.toString();
 	}
 
+	inline function isAlpha(c:Int) {
+		return c >= "a".code && c <= "z".code || c >= "A".code && c <= "Z".code;
+	}
+
+	inline function isNum(c:Int) {
+		return c >= "0".code && c <= "9".code;
+	}
+
+	inline function isAlphaNum(c:Int) {
+		return isAlpha(c) || isNum(c);
+	}
+
+	inline function isAlphaDash(c:Int) {
+		return isAlpha(c) || c == "_".code || c == "-".code;
+	}
+
+	inline function isAlphaNumDash(c:Int) {
+		return isAlphaNum(c) || c == "_".code || c == "-".code;
+	}
+
 	function token():Token {
 		eatWhitespace();
 		var start = linepos;
+		function t(t:TokenKind):Token {
+			return {
+				t: t,
+				pos: {
+					file: filename,
+					line: line,
+					min: start,
+					max: linepos
+				}
+			}
+		}
 		var c = next();
-		var t = switch c {
+		return t(switch c {
 			case "[".code: TSquareBracketOpen;
 			case "]".code: TSquareBracketClose;
 			case "{".code: TBraceOpen;
@@ -193,39 +241,157 @@ class Lexer {
 			case "-".code if (match("Infinity")): TIdent("-Infinity");
 			case null: TEof;
 			case _:
-				if (decimal_reg.match(input.substr(pos - 1))) {
-					var matched = decimal_reg.matched(0);
-					pos += matched.length - 1;
-					linepos += matched.length - 1;
-					TDecimal(matched);
-				} else if (integer_reg.match(input.substr(pos - 1))) {
-					var matched = integer_reg.matched(0);
-					pos += matched.length - 1;
-					linepos += matched.length - 1;
-					TInteger(matched);
-				} else if (ident_reg.match(input.substr(pos - 1))) {
-					var matched = ident_reg.matched(0);
-					pos += matched.length - 1;
-					linepos += matched.length - 1;
-					Keyword.ALL_KEYWORDS.indexOf(cast matched) > -1 ? TKeyword(cast matched) : TIdent(matched);
-				} else {
-					throw new LexerError({
-						file: filename,
-						line: line,
-						min: start,
-						max: linepos
-					}, "Invalid character : " + std.String.fromCharCode(c));
+				this.pos -= 1;
+				this.linepos -= 1;
+				final pos = this.pos;
+				final line = this.line;
+				final linepos = this.linepos;
+
+				inline function _restore() {
+					this.pos = pos;
+					this.line = line;
+					this.linepos = linepos;
 				}
-		}
-		return {
-			t: t,
-			pos: {
-				file: filename,
-				line: line,
-				min: start,
-				max: linepos
-			}
-		}
+
+				~/^-?(([0-9]+\.[0-9]*|[0-9]*\.[0-9]+)([Ee][+-]?[0-9]+)?|[0-9]+[Ee][+-]?[0-9]+)/m;
+				{
+					final hasMin = match("-");
+					// ([Ee][+-]?[0-9]+)
+					function parseE() {
+						save();
+						if (current() == "E".code || current() == "e".code) {
+							next();
+							if (current() == "+".code || current() == "-".code) {
+								next();
+							}
+							if (isNum(current())) {
+								next();
+								while (isNum(current()))
+									next();
+								return true;
+							}
+						}
+						restore();
+						return false;
+					}
+					// ([0-9]+\.[0-9]*|[0-9]*\.[0-9]+)
+					function branch1() {
+						save();
+						if (isNum(current())) {
+							next();
+							while (isNum(current()))
+								next();
+							if (match(".")) {
+								while (isNum(current()))
+									next();
+								parseE();
+								return true;
+							}
+						}
+						restore();
+						while (isNum(current()))
+							next();
+						if (match(".")) {
+							if (isNum(next())) {
+								while (isNum(current()))
+									next();
+							}
+							parseE();
+							return true;
+						}
+						return false;
+					}
+					// [0-9]+[Ee][+-]?[0-9]+
+					function branch2() {
+						save();
+						if (isNum(current())) {
+							next();
+							while (isNum(current()))
+								next();
+						}
+						if (parseE()) {
+							return true;
+						}
+						restore();
+						return false;
+					}
+					if (branch1() || branch2()) {
+						return t(TDecimal(input.substring(pos, this.pos)));
+					}
+				}
+				_restore();
+				~/^-?([1-9][0-9]*|0[Xx][0-9A-Fa-f]+|0[0-7]*)/m;
+				{
+					save();
+					final hasMin = match("-");
+					function parseDecimal() {
+						save();
+						final n = next();
+						if (n >= "1".code && n <= "9".code) {
+							while (isNum(current()))
+								next();
+							return true;
+						}
+						restore();
+						return false;
+					}
+					function parseHex() {
+						save();
+						if (next() == "0".code) {
+							final n = next();
+							if (n == "X".code || n == "x".code) {
+								inline function isHex(c:Int) {
+									return isNum(c) || c >= 'A'.code && c <= "F".code || c >= 'a'.code && c <= 'f'.code;
+								}
+								if (isHex(next())) {
+									while (isHex(current()))
+										next();
+									return true;
+								}
+							}
+						}
+						restore();
+						return false;
+					}
+					function parseOctal() {
+						save();
+						if (next() == "0".code) {
+							if (isNum(current())) {
+								next();
+								while (isNum(current()))
+									next();
+							}
+							return true;
+						}
+						restore();
+						return false;
+					}
+					if (parseDecimal() || parseHex() || parseOctal()) {
+						// let's forget about octal for now
+						return t(TInteger(input.substring(pos, this.pos)));
+					}
+					restore();
+				}
+				_restore();
+				~/^[_-]?[A-Za-z][0-9A-Z_a-z-]*/m;
+				if (isAlphaDash(next())) {
+					while (isAlphaNumDash(current()))
+						next();
+					final ident = input.substring(pos, this.pos);
+					if (Keyword.ALL_KEYWORDS.indexOf(cast ident) > -1) {
+						return t(TKeyword(cast ident));
+					} else {
+						return t(TIdent(ident));
+					}
+				}
+				_restore();
+				throw new LexerError({
+					file: filename,
+					line: line,
+					min: start,
+					max: linepos
+				}, "Invalid character : " + std.String.fromCharCode(c));
+		});
 	}
 
 	public function _lex():Array<Token> {

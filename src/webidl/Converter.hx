@@ -5,17 +5,49 @@ import haxe.macro.Expr;
 import haxe.macro.Expr.Field;
 import haxe.macro.Expr.ComplexType;
 import haxe.macro.Expr.TypeDefinition;
-import webidl.Ast;
+import webidl.Ast.InterfaceType;
+import webidl.Ast.DictionaryType;
+import webidl.Ast.EnumType;
+import webidl.Ast.TypedefType;
+import webidl.Ast.Definition;
 import haxe.ds.StringMap;
 
+#if !eval
+using webidl.Converter.ContextUtils;
+#end
 using Lambda;
 using StringTools;
+
+#if !eval
+class ContextUtils {
+	public static function makeExpr(_:Class<haxe.macro.Context>, v:Dynamic, pos:Position):haxe.macro.Expr {
+		var e:haxe.macro.Expr.ExprDef = switch Type.typeof(v) {
+			case TNull: EConst(CIdent("null"));
+			case TInt: EConst(CInt(Std.string(v)));
+			case TFloat: EConst(CFloat(Std.string(v)));
+			case TBool: EConst(CIdent((v : Bool) ? "true" : "false"));
+			case TClass(std.String): EConst(CString((v : String)));
+			case _: throw "Not supported";
+		}
+		return {
+			expr: e,
+			pos: pos
+		};
+	}
+
+	public static function makePosition(_:Class<haxe.macro.Context>, inf:{min:Int, max:Int, file:String}):haxe.macro.Expr.Position {
+		return inf;
+	}
+}
+#end
 
 class Converter {
 	static function escape(s:String) {
 		return switch s {
-			case "interface", "dynamic", "function", "static", "import", "using":
-				"_" + s;
+			case "interface", "dynamic", "function", "static", "import", "using", "default", "operator", "inline", "continue", "break", "extends", "public",
+				"private":
+				"_"
+				+ s;
 			case var s:
 				s;
 		}
@@ -31,8 +63,11 @@ class Converter {
 	var partials:Array<Definition> = [];
 
 	var type_paths = new StringMap<haxe.macro.Expr.TypePath>();
+	var config:Config;
 
-	public function new() {}
+	public function new(config) {
+		this.config = config;
+	}
 
 	public inline function getTypePath(name:String):TypePath {
 		return type_paths.exists(name) ? cast type_paths.get(name) : {pack: [], name: name};
@@ -52,30 +87,30 @@ class Converter {
 						i.attributes = i.attributes.concat(part.attributes);
 						i.members = i.members.concat(part.members);
 					}
-				case Dictionary(part): {
-					var d = dictionaries.get(part.name);
-					if(d == null) {
-						dictionaries.set(part.name,part);
-					} else {
-						d.attributes = d.attributes.concat(part.attributes);
-						d.members = d.members.concat(part.members);
+				case Dictionary(part):
+					{
+						var d = dictionaries.get(part.name);
+						if (d == null) {
+							dictionaries.set(part.name, part);
+						} else {
+							d.attributes = d.attributes.concat(part.attributes);
+							d.members = d.members.concat(part.members);
+						}
 					}
-				}
-				case Namespace(n): // TODO
+				case Namespace(part):
 				case d:
-					trace(d);
-					throw "partials should be interfaces or namespaces";
+					Sys.println("Warning: Partials should be interfaces or namespaces");
 			}
 		// mix mixins
 		for (inc in includes) {
 			var i = interfaces.get(inc.included);
 			if (i == null) {
-				trace("unkown interface", inc.included);
+				Sys.println('Warning: unknown interface ${inc.included}');
 				continue;
 			}
 			var m = mixins.get(inc.what);
 			if (m == null) {
-				trace("Warning : Could not find mixin " + inc.what);
+				Sys.println("Warning : Could not find mixin " + inc.what);
 			} else {
 				i.members = i.members.concat(m.members);
 			}
@@ -92,8 +127,8 @@ class Converter {
 		return ret;
 	}
 
-	public function addDefinitions(defs:Array<Definition>, config:Config) {
-		var pack = config.pack;
+	public function addDefinitions(defs:Array<Definition>) {
+		var pack = [];
 		for (def in defs) {
 			switch def {
 				case Mixin(i):
@@ -129,14 +164,14 @@ class Converter {
 							settype: null,
 							maptype: null,
 							iterabletype: null,
-							readonlysetlike: null,
+							readonlysetlike: false,
 							maplike: false,
 							readonlymaplike: false,
 							iterable: false,
 							keyvalueiterable: false
 						});
 					} else {
-						addDefinitions(n.members, config);
+						addDefinitions(n.members);
 					}
 				case Dictionary(d):
 					type_paths.set(d.name, {
@@ -164,8 +199,6 @@ class Converter {
 				case InterfaceMember(i):
 			}
 		}
-		for (name => path in config.typemap)
-			type_paths.set(name, path);
 	}
 
 	function mergeMixin(mixin:InterfaceType, into:InterfaceType):InterfaceType {
@@ -174,7 +207,7 @@ class Converter {
 	}
 
 	// static var conversions = new Map<String, String>();
-	function typeToHaxe(t:CType):ComplexType {
+	function typeToHaxe(t:webidl.Ast.CType):ComplexType {
 		return switch t {
 			// @formatter:off
 			case Rest(typeToHaxe(_) => t): macro :haxe.extern.Rest<$t>;
@@ -199,7 +232,7 @@ class Converter {
 				if(p == null) throw "assert";
 					TPath(p);
 				}else {
-					// trace("Warning : Failed to resolve identifier " + s);
+					Sys.println("Warning : Failed to resolve identifier " + s);
 					macro :Dynamic;
 				}
 			
@@ -227,7 +260,7 @@ class Converter {
 		}
 	}
 
-	function valueToExpr(v:Value) {
+	function valueToExpr(v:webidl.Ast.Value) {
 		return switch v {
 			case String(s): macro $v{s};
 			case EmptyDict: macro {};
@@ -237,7 +270,7 @@ class Converter {
 		}
 	}
 
-	function constToExpr(c:Constant):haxe.macro.Expr {
+	function constToExpr(c:webidl.Ast.Constant):haxe.macro.Expr {
 		return switch c {
 			case True: macro true;
 			case False: macro false;
@@ -258,7 +291,7 @@ class Converter {
 	function convertInterface(i:InterfaceType):TypeDefinition {
 		final path:TypePath = getTypePath(i.name);
 		final pack = path.pack;
-
+		final exclude = config.types.exists(i.name) ? (cast config.types.get(i.name) : {var exclude:Array<String>;}).exclude : [];
 		if (!i.maplike
 			&& !i.iterable
 			&& !i.setlike
@@ -324,7 +357,7 @@ class Converter {
 					}
 			final fields:Array<Field> = [
 				for (f in i.members)
-					if (f != null) switch f.kind {
+					if (f != null && !exclude.contains(f.name)) switch f.kind {
 						case Const(type, value):
 							{
 								name: escape(f.name),
@@ -417,7 +450,6 @@ class Converter {
 				name: i.name,
 				pos: (macro null).pos,
 				kind: TDClass(i.parent == null ? null : try getTypePath(i.parent) catch (_) {
-					// trace(i.parent);
 					null;
 				}, null, false, false, false),
 				fields: fields,
@@ -434,11 +466,19 @@ class Converter {
 	}
 
 	function convertDictionary(e:DictionaryType):TypeDefinition {
+		// convert to an abstract, because @:native is not supported on typedefs
 		final path:TypePath = getTypePath(e.name);
+		var members = e.members;
+		if (e.parent != null) {
+			final parent = dictionaries.get(e.parent);
+			if (parent != null) {
+				members = members.concat(parent.members);
+			}
+		}
 		final fields:Array<Field> = [
-			for (m in e.members)
+			for (m in members)
 				{
-					name: m.name,
+					name: escape(m.name),
 					kind: FVar(typeToHaxe(m.type), null /**Typedefs do not support default values in haxe**/),
 					pos: (macro null).pos,
 					meta: if (m.optional) [
@@ -449,33 +489,89 @@ class Converter {
 					] else null
 				}
 		];
-		return if (e.parent != null) {
-			pack: path.pack,
-			name: e.name,
-			pos: (macro null).pos,
-			kind: TDAlias(TExtend([
-				try
-					getTypePath(e.parent)
-				catch (_) {
-					// trace(e.parent);
-					{
-						pack: [],
-						name: "Dynamic"
+		final complex_type:ComplexType = TAnonymous(fields);
+		final abstract_fields:Array<Field> = [
+			{
+				name: "fromAnon",
+				kind: FFun({
+					args: [
+						{
+							name: "foo",
+							type: complex_type
+						}
+					],
+					ret: TPath(path),
+					expr: macro {
+						var ret = {};
+						$b{
+							fields.map(f -> {
+								final name = f.name;
+								macro ret.$name = foo.$name;
+							})
+						};
+						return cast ret;
 					}
-				}
-			], fields)),
-			fields: []
-		} else {
+				}),
+				pos: (macro null).pos,
+				access: [AInline, AExtern],
+				meta: [
+					{
+						name: ":from",
+						pos: (macro null).pos
+					}
+				]
+			}
+		];
+		for (m in members) {
+			abstract_fields.push({
+				name: escape(m.name),
+				kind: FProp("get", "set", typeToHaxe(m.type)),
+				pos: (macro null).pos,
+				access: [APublic]
+			});
+			abstract_fields.push({
+				name: "get_" + escape(m.name),
+				kind: FFun({
+					args: [],
+					ret: typeToHaxe(m.type),
+					expr: macro {
+						return untyped this[$v{m.name}];
+					}
+				}),
+				pos: (macro null).pos,
+				access: [AInline, AExtern, APublic]
+			});
+			abstract_fields.push({
+				name: "set_" + escape(m.name),
+				kind: FFun({
+					args: [
+						{
+							name: "value",
+							type: typeToHaxe(m.type)
+						}
+					],
+					ret: typeToHaxe(m.type),
+					expr: macro {
+						untyped this[$v{m.name}] = value;
+						return value;
+					}
+				}),
+				pos: (macro null).pos,
+				access: [AInline, AExtern, APublic]
+			});
+		}
+		final type_def:TypeDefinition = {
 			pack: path.pack,
 			name: e.name,
 			pos: (macro null).pos,
-			kind: TDStructure,
-			fields: fields
+			kind: TDAbstract(macro:{}),
+			fields: abstract_fields
 		}
+		return type_def;
 	}
 
 	function toIdent(s:String) {
-		s = s.replace("-", "_");
+		s = s.replace("-", "_").replace("/", "_").replace("+", "_");
 		final r = ~/^[0-9]/m;
 		if (r.match(s))
 			return "_" + s;
@@ -491,7 +587,7 @@ class Converter {
 			kind: TDAbstract(macro:String, [macro:String], [macro:String]),
 			fields: [
 				for (m in e.values)
-					{
+					if (m != "") {
 						name: toIdent(m).toUpperCase(), // Make them higher up in completion
 						kind: FVar(null, macro $v{m}),
 						pos: (macro null).pos
