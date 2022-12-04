@@ -6,5 +6,7 @@
             "returnValue",
             "initEvent"
         ]
-    }
+    },
+    "WindowProxy": "Window",
+    "CSSOMString": "String"
 }

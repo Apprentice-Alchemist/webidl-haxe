@@ -283,6 +283,11 @@ class Parser {
 				var t = parseType();
 				consume(TRightArrow);
 				FrozenArray(t);
+			case TIdent("ObservableArray"):
+				consume(TLeftArrow);
+				var t = parseType();
+				consume(TRightArrow);
+				ObservableArray(t);
 			case TIdent("record"):
 				consume(TLeftArrow);
 				var s = parseType();
@@ -295,11 +300,6 @@ class Parser {
 				var t = parseType();
 				consume(TRightArrow);
 				Promise(t);
-			case TIdent("ObservableArray"):
-				consume(TLeftArrow);
-				var t = parseType();
-				consume(TRightArrow);
-				Ident("ObservableArray");
 			case TIdent(s):
 				var c:Null<CType> = null;
 				for (t in CType.getConstructors())
@@ -376,7 +376,8 @@ class Parser {
 						case TIdent(_):
 							consume(TParenOpen);
 						case TParenOpen:
-						case _: throw unexpected();
+						case _:
+							throw unexpected();
 					}
 					var type = parseType();
 					ident();

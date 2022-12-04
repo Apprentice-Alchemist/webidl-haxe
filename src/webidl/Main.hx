@@ -15,8 +15,7 @@ class Main {
 		var output = "idl";
 		var files = [];
 		var format = false;
-		final handler = Args.generate([
-			@doc("Set output folder")
+		final handler = Args.generate([@doc("Set output folder")
 			["-o", "--output"] => (arg:String) -> output = arg,
 			@doc("Run the formatter on the output")
 			["--format"] => () -> format = true,
@@ -71,16 +70,16 @@ class Main {
 			}
 		}
 		final printer = new webidl.Printer();
-		final file = sys.io.File.write("out/Dom.hx");
-		file.writeString("package;");
 		for (td in converter.convert()) {
 			if (td.pack == null)
 				td.pack = [];
 			final dir = makePath([output].concat(td.pack));
 			FileSystem.createDirectory(dir);
+			final file = sys.io.File.write('$dir/${td.name}.hx');
+			file.writeString("package;");
 			file.writeString(printer.printTypeDefinition(td, false));
+			file.close();
 		}
-		file.close();
 		if (format)
 			Sys.command("haxelib run formatter -s " + output);
 	}

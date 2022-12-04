@@ -1,5 +1,6 @@
 package webidl;
 
+import webidl.Ast.CallbackType;
 import haxe.ds.ArraySort;
 import haxe.macro.Expr;
 import haxe.macro.Expr.Field;
@@ -57,6 +58,7 @@ class Converter {
 	var dictionaries = new StringMap<DictionaryType>();
 	var enums = new StringMap<EnumType>();
 	var typedefs = new StringMap<TypedefType>();
+	var callbacks = new StringMap<CallbackType>();
 
 	var mixins = new StringMap<InterfaceType>();
 	var includes:Array<{what:String, included:String}> = [];
@@ -67,6 +69,9 @@ class Converter {
 
 	public function new(config) {
 		this.config = config;
+		for (name => type_path in config.typedefs) {
+			type_paths.set(name, type_path);
+		}
 	}
 
 	public inline function getTypePath(name:String):TypePath {
@@ -124,6 +129,8 @@ class Converter {
 			ret.push(convertDictionary(d));
 		for (t in typedefs)
 			ret.push(convertTypedef(t));
+		for(c in callbacks)
+			ret.push(convertCallback(c));
 		return ret;
 	}
 
@@ -186,6 +193,11 @@ class Converter {
 					});
 					enums.set(e.name, e);
 				case Callback(c):
+					type_paths.set(c.name, {
+						pack: pack,
+						name: c.name
+					});
+					callbacks.set(c.name, c);
 				case Typedef(t):
 					type_paths.set(t.name, {
 						pack: pack,
@@ -228,8 +240,8 @@ class Converter {
 			case WithAttributes(e, typeToHaxe(_) => t): t; // TODO
 			case Ident(s): 
 				if(type_paths.exists(s)){
-				var p = getTypePath(s);
-				if(p == null) throw "assert";
+					var p = getTypePath(s);
+					if(p == null) throw "assert";
 					TPath(p);
 				}else {
 					Sys.println("Warning : Failed to resolve identifier " + s);
@@ -256,6 +268,7 @@ class Converter {
 			case Float32Array: macro :js.lib.Float32Array;
 			case Float64Array: macro :js.lib.Float64Array;
 			case FrozenArray(typeToHaxe(_) => t): macro :haxe.ds.ReadOnlyArray<$t>;
+			case ObservableArray(typeToHaxe(_) => t): macro :Array<$t>;
 			// @formatter:on
 		}
 	}
@@ -513,7 +526,7 @@ class Converter {
 					}
 				}),
 				pos: (macro null).pos,
-				access: [AInline, AExtern],
+				access: [AInline, AExtern, AStatic],
 				meta: [
 					{
 						name: ":from",
@@ -621,6 +634,23 @@ class Converter {
 			name: t.name,
 			pos: (macro null).pos,
 			kind: TDAlias(typeToHaxe(t.type)),
+			fields: []
+		}
+	}
+
+	function convertCallback(c:CallbackType):TypeDefinition {
+		final path = getTypePath(c.name);
+		return {
+			pack: path.pack,
+			name: c.name,
+			pos: (macro null).pos,
+			kind: TDAlias(TFunction(c.args.map(arg -> {
+				final t = typeToHaxe(arg.type);
+				if (arg.optional || arg.value != null)
+					TOptional(t)
+				else
+					t;
+			}), typeToHaxe(c.ret))),
 			fields: []
 		}
 	}

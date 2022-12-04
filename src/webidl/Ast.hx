@@ -38,9 +38,9 @@ enum InterfaceMemberKind {
 	Const(type:CType, value:Constant);
 	Attribute(type:CType, _static:Bool, readonly:Bool);
 	Function(ret:CType, args:Array<Argument>, _static:Bool);
-	Setlike(readonly:Bool,type:CType);
+	Setlike(readonly:Bool, type:CType);
 	Maplike(readonly:Bool, type:CType);
-	Iterable(readonly:Bool,type:CType);
+	Iterable(readonly:Bool, type:CType);
 	Deleter;
 	Setter;
 	Getter;
@@ -93,16 +93,19 @@ typedef TypedefType = {
 	var type:CType;
 }
 
+typedef CallbackType = Named &
+	Annotated & {
+	var ret:CType;
+	var args:Array<Argument>;
+}
+
 enum Definition {
 	Mixin(i:InterfaceType);
 	Interface(i:InterfaceType);
 	Namespace(n:NamespaceType);
 	Dictionary(d:DictionaryType);
 	Enum(e:EnumType);
-	Callback(c:Named & Annotated & {
-		var ret:CType;
-		var args:Array<Argument>;
-	});
+	Callback(c:CallbackType);
 	Typedef(t:TypedefType);
 	Includes(what:String, included:String);
 	Partial(d:Definition);
@@ -179,4 +182,5 @@ enum CType {
 	Float32Array;
 	Float64Array;
 	FrozenArray(t:CType);
+	ObservableArray(t:CType);
 }
