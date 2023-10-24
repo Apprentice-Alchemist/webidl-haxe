@@ -503,6 +503,7 @@ class Converter {
 				}
 		];
 		final complex_type:ComplexType = TAnonymous(fields);
+		var ret_complex_type = TPath(path);
 		final abstract_fields:Array<Field> = [
 			{
 				name: "fromAnon",
@@ -515,14 +516,14 @@ class Converter {
 					],
 					ret: TPath(path),
 					expr: macro {
-						var ret = {};
+						var ret:$ret_complex_type = cast {};
 						$b{
 							fields.map(f -> {
 								final name = f.name;
 								macro ret.$name = foo.$name;
 							})
 						};
-						return cast ret;
+						return ret;
 					}
 				}),
 				pos: (macro null).pos,
